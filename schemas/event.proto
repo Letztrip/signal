@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+// Wire format for the events-raw Pub/Sub topic. The topic has this schema
+// registered, and the BigQuery subscription consumes it via use_topic_schema.
+//
+// Field numbers, once assigned, are NEVER changed. Adding columns: append
+// new fields with new tag numbers, then add the matching nullable column
+// to the BigQuery table. Old messages will land with NULL for the new
+// column. Removing or renaming columns is not supported — that is a new
+// table.
+//
+// Timestamps are RFC3339 strings (e.g. "2026-05-09T12:00:00.000Z"), not
+// google.protobuf.Timestamp. Pub/Sub Schema Registry rejects external
+// imports, so we use plain strings; BQ subscriptions parse RFC3339 into
+// TIMESTAMP columns natively.
+package analytics.v1;
+
+option go_package = "github.com/example/event-pipeline/collector/eventpb";
+
+message AnalyticsEvent {
+  string event_id        = 1;
+  string event_name      = 2;
+  string user_id         = 3;
+  string anonymous_id    = 4;
+  string session_id      = 5;
+  string client_ts       = 6;
+  string server_ts       = 7;
+  string platform        = 8;
+  string app_version     = 9;
+  string sdk_version     = 10;
+  string app_id          = 11;
+  string ua_family       = 12;
+  string ua_os           = 13;
+  string geo_country     = 14;
+  string ingest_version  = 15;
+  string properties      = 16;
+  string context         = 17;
+}

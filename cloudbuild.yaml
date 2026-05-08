@@ -1,0 +1,198 @@
+# Cloud Build pipeline for the Signal collector.
+#
+# Triggers on tag push (TAG_NAME comes from the GitHub trigger).
+#
+# Pre-requisites that must exist in the project before this pipeline runs
+# (one-time setup via scripts/bootstrap-gcp.sh):
+#   - Pub/Sub schema events-raw-schema, topic events-raw, DLQ topic
+#     events-raw-dlq, BQ subscription events-raw-to-bq.
+#   - Secret Manager secret `write-keys` with at least one PHC-hashed entry.
+#   - Service account collector-vm@${_PROJECT_ID}.iam.gserviceaccount.com
+#     with: pubsub.publisher + pubsub.viewer on events-raw,
+#     secretmanager.secretAccessor on the write-keys secret,
+#     redis.editor (only if Memorystore is in use).
+#   - Artifact Registry docker repo named ${_ARTIFACTS_REPO}.
+#   - The Cloud Build service account
+#     (${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com) must have:
+#       * roles/iam.serviceAccountUser on ${_COLLECTOR_SA}
+#       * roles/run.admin and roles/artifactregistry.writer on the project.
+
+steps:
+  - id: 'Scan Secrets'
+    name: 'zricethezav/gitleaks:latest'
+    args:
+      - detect
+      - --source=.
+      - --no-git
+      - --exit-code=1
+      - --redact
+
+  - id: 'Test Collector'
+    name: 'golang:1.22'
+    entrypoint: '/bin/sh'
+    dir: 'collector'
+    args:
+      - '-c'
+      - |-
+        go vet ./...
+        go test ./... -count=1
+    env:
+      - 'GOFLAGS=-mod=mod'
+      - 'GOPATH=/workspace/.go'
+      - 'GOMODCACHE=/workspace/.gomodcache'
+
+  - id: 'Build Image'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -f
+      - collector/Dockerfile
+      - -t
+      - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}
+      - -t
+      - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:latest
+      - --cache-from
+      - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:latest
+      - --build-arg
+      - BUILDKIT_INLINE_CACHE=1
+      - collector
+
+  - id: 'Scan Image'
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: '/bin/bash'
+    args:
+      - '-c'
+      - |-
+        IMAGE="us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}"
+        docker save "$IMAGE" -o /workspace/image.tar
+        docker run --rm -v /workspace:/workspace aquasec/trivy:latest \
+          image --input /workspace/image.tar \
+          --severity CRITICAL --exit-code 1 --no-progress
+
+  - id: 'Push Image'
+    name: 'gcr.io/cloud-builders/docker'
+    args: [push, --all-tags, 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}']
+
+  - id: 'Deploy (no traffic)'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_CLOUD_RUN_SERVICE}
+      - --image
+      - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}
+      - --project
+      - ${_PROJECT_ID}
+      - --region
+      - ${_REGION}
+      - --port
+      - '8080'
+      - --memory
+      - 512Mi
+      - --cpu
+      - '1'
+      - --min-instances
+      - '1'
+      - --max-instances
+      - '100'
+      - --concurrency
+      - '80'
+      - --timeout
+      - '60'
+      - --no-traffic
+      - --service-account=${_COLLECTOR_SA}
+      - --network=${_VPC_NETWORK}
+      - --subnet=${_VPC_SUBNET}
+      - --vpc-egress=private-ranges-only
+      - --allow-unauthenticated
+      - --set-env-vars=GCP_PROJECT=${_PROJECT_ID}
+      - --set-env-vars=PUBSUB_TOPIC=${_PUBSUB_TOPIC}
+      - --set-env-vars=COLLECTOR_PORT=8080
+      - --set-env-vars=LOG_LEVEL=${_LOG_LEVEL}
+      - --set-env-vars=REDIS_ADDR=${_REDIS_ADDR}
+      - --set-env-vars=COLLECTOR_VERSION=${TAG_NAME}
+      - --set-env-vars=ENVIRONMENT=${_ENVIRONMENT}
+      - --set-env-vars=WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest
+
+  - id: 'Smoke /healthz'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: '/bin/bash'
+    args:
+      - '-c'
+      - |-
+        # Resolve the latest revision URL and ping /healthz before routing traffic.
+        REV_URL=$(gcloud run revisions list \
+          --service=${_CLOUD_RUN_SERVICE} \
+          --region=${_REGION} \
+          --project=${_PROJECT_ID} \
+          --format='value(status.address.url)' \
+          --limit=1)
+        if [ -z "$REV_URL" ]; then
+          REV_URL=$(gcloud run services describe ${_CLOUD_RUN_SERVICE} \
+            --region=${_REGION} --project=${_PROJECT_ID} \
+            --format='value(status.url)')
+        fi
+        echo "Pinging $REV_URL/healthz"
+        for i in 1 2 3 4 5; do
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$REV_URL/healthz" || true)
+          if [ "$STATUS" = "200" ]; then echo "healthy"; exit 0; fi
+          sleep 5
+        done
+        echo "Health check failed after 5 attempts"; exit 1
+
+  - id: 'Route Canary 10%'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: '/bin/sh'
+    args:
+      - '-c'
+      - |-
+        gcloud run services update-traffic ${_CLOUD_RUN_SERVICE} \
+          --region=${_REGION} \
+          --project=${_PROJECT_ID} \
+          --to-revisions=LATEST=10
+        echo "Canary deployed at 10% — waiting 60s for health signals"
+        sleep 60
+
+  - id: 'Promote to 100%'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update-traffic
+      - ${_CLOUD_RUN_SERVICE}
+      - --region=${_REGION}
+      - --project=${_PROJECT_ID}
+      - --to-latest
+
+substitutions:
+  _PROJECT_ID: letztrip-production-account
+  _ARTIFACTS_REPO: signal-repo
+  _REGION: us-central1
+  _SERVICE_NAME: collector
+  _CLOUD_RUN_SERVICE: signal-collector
+  _ENVIRONMENT: production
+  _VPC_NETWORK: letztrip-private-network
+  _VPC_SUBNET: letztrip-private-network
+  # If you fork to a different GCP project, override _COLLECTOR_SA via the
+  # build trigger or `gcloud builds submit --substitutions=_COLLECTOR_SA=...`
+  _COLLECTOR_SA: collector-vm@letztrip-production-account.iam.gserviceaccount.com
+  _PUBSUB_TOPIC: events-raw
+  _WRITE_KEYS_SECRET_NAME: write-keys
+  _LOG_LEVEL: info
+  # Empty by default — collector logs a warning and runs without idempotency
+  # cache. Set to <memorystore-host>:6379 once a Redis instance is provisioned.
+  _REDIS_ADDR: ''
+
+options:
+  substitution_option: ALLOW_LOOSE
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+timeout: 1800s
+tags: [signal, collector, '${TAG_NAME}']
+
+images:
+  - 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}'
+  - 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:latest'

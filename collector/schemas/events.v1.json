@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/events.v1.json",
+  "title": "AnalyticsEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_name",
+    "client_ts",
+    "anonymous_id",
+    "session_id",
+    "context"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Client-generated UUID v4 for downstream dedup."
+    },
+    "event_name": {
+      "type": "string",
+      "enum": [
+        "page_viewed",
+        "button_clicked",
+        "form_submitted",
+        "identify",
+        "session_started",
+        "error_occurred"
+      ]
+    },
+    "user_id": {
+      "type": ["string", "null"],
+      "maxLength": 128
+    },
+    "anonymous_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "client_ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "properties": {
+      "type": "object",
+      "maxProperties": 50,
+      "additionalProperties": true
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["platform", "app_version", "sdk_version"],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": ["web", "flutter_ios", "flutter_android"]
+        },
+        "app_version": { "type": "string", "minLength": 1 },
+        "sdk_version": { "type": "string", "minLength": 1 },
+        "locale": { "type": "string" },
+        "timezone": { "type": "string" },
+        "screen": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "width": { "type": "integer", "minimum": 0 },
+            "height": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "page": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "url": { "type": "string" },
+            "path": { "type": "string" },
+            "referrer": { "type": "string" },
+            "title": { "type": "string" }
+          }
+        },
+        "device": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

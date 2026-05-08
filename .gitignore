@@ -1,0 +1,9 @@
+.env
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Service-account key files. Never commit these.
+*-key.json
+*.sa.json

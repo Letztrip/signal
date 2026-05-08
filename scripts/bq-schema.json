@@ -1,0 +1,19 @@
+[
+  { "name": "event_id",       "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "event_name",     "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "user_id",        "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "anonymous_id",   "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "session_id",     "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "client_ts",      "type": "TIMESTAMP", "mode": "NULLABLE" },
+  { "name": "server_ts",      "type": "TIMESTAMP", "mode": "NULLABLE" },
+  { "name": "platform",       "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "app_version",    "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "sdk_version",    "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "app_id",         "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "ua_family",      "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "ua_os",          "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "geo_country",    "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "ingest_version", "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "properties",     "type": "JSON",      "mode": "NULLABLE" },
+  { "name": "context",        "type": "JSON",      "mode": "NULLABLE" }
+]

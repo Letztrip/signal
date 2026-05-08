@@ -1,0 +1,33 @@
+name: event-pipeline-dev
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 10
+
+  collector:
+    build: ./collector
+    environment:
+      GCP_PROJECT: ${GCP_PROJECT:-letztrip-production-account}
+      PUBSUB_TOPIC: ${PUBSUB_TOPIC:-events-raw}
+      # Pick exactly ONE: WRITE_KEYS_SECRET (Secret Manager, prod) OR
+      # WRITE_KEYS_PLAINTEXT (inline plaintext, dev only). Either being
+      # unset is fine; both unset makes the collector exit at startup.
+      WRITE_KEYS_SECRET: ${WRITE_KEYS_SECRET:-}
+      WRITE_KEYS_PLAINTEXT: ${WRITE_KEYS_PLAINTEXT:-demo-app:wk_dev_66UYJ1fXMqTOziaL1jgjcQ2pkC9zCa2d}
+      REDIS_ADDR: redis:6379
+      COLLECTOR_PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      GOOGLE_APPLICATION_CREDENTIALS: /gcp/key.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS_HOST:-$PWD/collector-vm-key.json}:/gcp/key.json:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
