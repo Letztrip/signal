@@ -8,7 +8,7 @@
 // `initAnalytics(sessionId: applicationVariables.sessionID)` so analytics
 // events carry the same id that goes into HTTP headers (`X-Session-Id`,
 // sent via lib/shared/utils/callAPI.dart) and the webview's
-// `signal_session_id`. The helper falls back to its own UUID v4 only when
+// `pulse_session_id`. The helper falls back to its own UUID v4 only when
 // no id is provided — that case should never happen in production.
 //
 // Wire endpoint + write key via --dart-define at build time:

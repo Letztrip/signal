@@ -609,11 +609,11 @@ already has one. Web reads it from `sessionStorage` (the same place
 Flutter receives it via `initAnalytics(sessionId: ...)` from the host's
 `applicationVariables.sessionID`. This keeps a **single session id**
 across native HTTP requests, webview-injected storage
-(`signal_session_id`), and analytics events — no double-counting.
+(`pulse_session_id`), and analytics events — no double-counting.
 
 | Stack | Where | What goes there |
 |---|---|---|
-| Next.js App Router | New `app/AnalyticsBoot.tsx` client component, mounted in `app/layout.tsx` | Helper auto-detects session id from `sessionStorage['signal_session_id']` (webview) or `sessionStorage['x-session-id']` (canonical web). |
+| Next.js App Router | New `app/AnalyticsBoot.tsx` client component, mounted in `app/layout.tsx` | Helper auto-detects session id from `sessionStorage['pulse_session_id']` (webview) or `sessionStorage['x-session-id']` (canonical web). |
 | Next.js Pages Router | Edit `pages/_app.tsx` | Same auto-detection. |
 | React SPA | Edit `src/App.tsx` or `src/main.tsx` | Same auto-detection. |
 | Flutter | Edit `lib/main.dart` | `await initAnalytics(sessionId: applicationVariables.sessionID);` before `runApp()` (after `WidgetsFlutterBinding.ensureInitialized()`). |
