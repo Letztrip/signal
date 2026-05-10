@@ -27,7 +27,8 @@
         "form_submitted",
         "identify",
         "session_started",
-        "error_occurred"
+        "error_occurred",
+        "scroll_depth"
       ]
     },
     "user_id": {

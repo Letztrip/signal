@@ -214,3 +214,75 @@ export function reset() {
   anonId = mintId('a_');
   try { localStorage.setItem(ANON_KEY, anonId); } catch { /* ignore */ }
 }
+
+// Scroll-depth tracking — opt-in. Call once at app boot (e.g. inside the
+// AnalyticsBoot effect). Listens to scroll on either `window` (default) or
+// a specific element. Fires `track('scroll_depth', { percent, name })` at
+// each milestone (25/50/75/100% by default), once per page. Milestones
+// reset automatically when `location.pathname` changes.
+let scrollWired = false;
+export function trackScrollDepth(opts: {
+  element?: HTMLElement;
+  milestones?: number[];
+  name?: string;
+} = {}): void {
+  if (typeof window === 'undefined') return;
+  if (scrollWired) return;
+  scrollWired = true;
+
+  const milestones = (opts.milestones ?? [25, 50, 75, 100]).slice().sort((a, b) => a - b);
+  const target: HTMLElement | Window = opts.element ?? window;
+  const fired = new Set<number>();
+  let lastPath = location.pathname;
+  let queued = false;
+
+  function metrics(): { pct: number } | null {
+    let scrollTop: number;
+    let scrollHeight: number;
+    let clientHeight: number;
+    if (target === window) {
+      scrollTop = window.scrollY;
+      scrollHeight = document.documentElement.scrollHeight;
+      clientHeight = window.innerHeight;
+    } else {
+      const el = target as HTMLElement;
+      scrollTop = el.scrollTop;
+      scrollHeight = el.scrollHeight;
+      clientHeight = el.clientHeight;
+    }
+    const max = scrollHeight - clientHeight;
+    if (max <= 0) return null;
+    const pct = Math.min(100, Math.max(0, Math.round((scrollTop / max) * 100)));
+    return { pct };
+  }
+
+  function check() {
+    if (location.pathname !== lastPath) {
+      lastPath = location.pathname;
+      fired.clear();
+    }
+    const m = metrics();
+    if (!m) return;
+    for (const ms of milestones) {
+      if (m.pct >= ms && !fired.has(ms)) {
+        fired.add(ms);
+        track('scroll_depth', {
+          percent: ms,
+          path: location.pathname,
+          name: opts.name ?? location.pathname,
+        });
+      }
+    }
+  }
+
+  function onScroll() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      check();
+    });
+  }
+
+  target.addEventListener('scroll', onScroll, { passive: true });
+}

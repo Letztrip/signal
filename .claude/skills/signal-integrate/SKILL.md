@@ -32,8 +32,10 @@ If invoked from the signal repo itself (the collector source), abort:
 3. Wire init (one place)
 4. Wire page-view auto-capture via the repo's own router/navigator (one place)
 5. **Walk the codebase and insert `track('button_clicked', ...)` at every
-   button/link, `track('form_submitted', ...)` at every form, and
-   `track('identify', ...)` wherever the auth state changes.**
+   button/link, `track('form_submitted', ...)` at every form,
+   `track('identify', ...)` wherever the auth state changes, and wire
+   `trackScrollDepth()` / `ScrollDepthTracker` on content-heavy pages
+   (opt-in).**
 6. Add env-var docs
 7. Verify build (typecheck / `dart analyze`)
 8. Print smoke-test instructions
@@ -363,7 +365,89 @@ FirebaseAuth.instance.authStateChanges().listen((user) {
 });
 ```
 
-### 5e. Confirm before doing it all in one shot
+### 5e. Wire scroll-depth tracking (opt-in, content-heavy pages)
+
+Scroll tracking is **not** auto-walked because it's only meaningful on
+long-content pages (feeds, articles, product detail pages). Asking the
+user *which* pages benefit is part of the conversation in this step.
+
+Discover scrollable surfaces:
+
+```bash
+# Web — long pages and explicit scroll containers
+grep -rn 'overflow-y\|overflow:.*auto\|overflow:.*scroll' --include='*.tsx' --include='*.jsx' --include='*.css' --include='*.scss' src app components 2>/dev/null
+
+# Flutter — scrollable widgets
+grep -rn 'ListView\|SingleChildScrollView\|CustomScrollView\|GridView' --include='*.dart' lib
+```
+
+Wire it on pages the user calls out as "feed-like" or "long-form":
+
+**Web (Next.js / React)** — single global helper, fires per pathname:
+
+```tsx
+// In app/AnalyticsBoot.tsx (App Router) or pages/_app.tsx (Pages):
+import { track, trackScrollDepth } from '@/lib/track';
+
+useEffect(() => {
+  track('session_started');
+  trackScrollDepth();   // ← listens to window scroll, resets per pathname
+}, []);
+```
+
+For pages with a custom scroll container (e.g. `<main className="overflow-y-auto">`):
+
+```tsx
+const ref = useRef<HTMLElement>(null);
+useEffect(() => {
+  if (ref.current) trackScrollDepth({ element: ref.current, name: 'feed' });
+}, []);
+```
+
+Note: `trackScrollDepth()` is idempotent on its first arg form — calling
+it twice for the window listener is a no-op.
+
+**Flutter** — one tracker instance per scrollable on the page:
+
+```dart
+class HomeFeedPage extends StatefulWidget {
+  @override
+  State<HomeFeedPage> createState() => _HomeFeedPageState();
+}
+
+class _HomeFeedPageState extends State<HomeFeedPage> {
+  final _scroll = ScrollDepthTracker(name: 'home_feed');
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        _scroll.onNotification(n);
+        return false;   // let the notification keep propagating
+      },
+      child: ListView.builder(...),
+    );
+  }
+}
+```
+
+Each `ScrollDepthTracker` keeps its own milestone-fired set, so the same
+page can have multiple trackers (e.g. main feed + a sidebar list) with
+distinct `name`s.
+
+**Defaults**: 25, 50, 75, 100% milestones. Override per call:
+`trackScrollDepth({ milestones: [50, 90] })` or
+`ScrollDepthTracker(name: '...', milestones: [50, 90])`.
+
+**What gets recorded**: each fired milestone is one event:
+```json
+{ "event_name": "scroll_depth", "properties": { "percent": 50, "name": "/feed" } }
+```
+
+Skip scroll tracking on form pages, dialogs, modals, and short interactive
+flows — every milestone is a row in BigQuery.
+
+### 5f. Confirm before doing it all in one shot
 
 If 50+ files need editing, batch:
 

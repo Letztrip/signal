@@ -378,6 +378,42 @@ SSNs in `properties`).
 }
 ```
 
+### 11.6a `scroll_depth` (web, content-heavy page)
+
+Fired automatically by `trackScrollDepth()` (web) / `ScrollDepthTracker`
+(Flutter) at 25/50/75/100% milestones, once per page.
+
+```json
+{
+  "event_id": "7e4d5c6b-8a9f-1e2d-3c4b-5a6f7e8d9c0b",
+  "event_name": "scroll_depth",
+  "anonymous_id": "a_2f8a91b3c4d5e6f7a8b9c0d1e2f3a4b5",
+  "session_id": "s_5b4a3c2d1e0f9a8b7c6d5e4f3a2b1c0d",
+  "client_ts": "2026-05-09T10:25:33.412Z",
+  "properties": {
+    "percent": 75,
+    "path": "/blog/2026/spring-collection",
+    "name": "/blog/2026/spring-collection"
+  },
+  "context": {
+    "platform": "web",
+    "app_version": "1.4.2",
+    "sdk_version": "0.1.0",
+    "locale": "en-IN",
+    "page": {
+      "url": "https://letztrip.com/blog/2026/spring-collection",
+      "path": "/blog/2026/spring-collection",
+      "referrer": "https://letztrip.com/blog",
+      "title": "Spring Collection 2026 - Letztrip"
+    }
+  }
+}
+```
+
+Each user generates **at most 4** scroll events per page (one per
+milestone). Skip on forms, dialogs, and short pages — every milestone is
+a row in BigQuery.
+
 ### 11.6 `error_occurred` (Flutter Android, in-app crash recovery)
 
 ```json
@@ -505,7 +541,7 @@ Expected response:
 | Field | Required | Notes |
 | --- | --- | --- |
 | `event_id` | ✓ | UUID v4 per event. Used as the dedup key. |
-| `event_name` | ✓ | One of: `page_viewed`, `button_clicked`, `form_submitted`, `identify`, `session_started`, `error_occurred`. |
+| `event_name` | ✓ | One of: `page_viewed`, `button_clicked`, `form_submitted`, `identify`, `session_started`, `error_occurred`, `scroll_depth`. |
 | `user_id` | optional | String or null. Empty string when anonymous. |
 | `anonymous_id` | ✓ | Persistent per-device id. SDK rotates on `reset()`. |
 | `session_id` | ✓ | Rolls after 30 min of inactivity. |

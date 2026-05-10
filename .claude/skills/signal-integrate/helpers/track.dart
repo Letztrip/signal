@@ -174,6 +174,40 @@ void setUserId(String? id) => _Analytics.instance.setUserId(id);
 void setSessionId(String sessionId) => _Analytics.instance.setSessionId(sessionId);
 Future<void> resetAnalytics() => _Analytics.instance.reset();
 
+// Scroll-depth tracking — opt-in per scrollable. Construct one per page
+// you care about, then forward ScrollNotifications:
+//
+//   final _scroll = ScrollDepthTracker(name: 'home_feed');
+//   ...
+//   NotificationListener<ScrollNotification>(
+//     onNotification: (n) { _scroll.onNotification(n); return false; },
+//     child: ListView(...),
+//   )
+//
+// Fires `track('scroll_depth', { percent, name })` at each milestone
+// (25/50/75/100% by default), once per tracker instance. Create a fresh
+// tracker per page mount if you want per-page reset.
+class ScrollDepthTracker {
+  ScrollDepthTracker({required this.name, List<int>? milestones})
+      : milestones = (milestones ?? const [25, 50, 75, 100]).toList()..sort();
+
+  final String name;
+  final List<int> milestones;
+  final Set<int> _fired = <int>{};
+
+  void onNotification(ScrollNotification n) {
+    final max = n.metrics.maxScrollExtent;
+    if (max <= 0) return;
+    final pct = ((n.metrics.pixels / max) * 100).clamp(0, 100).round();
+    for (final m in milestones) {
+      if (pct >= m && !_fired.contains(m)) {
+        _fired.add(m);
+        track('scroll_depth', {'percent': m, 'name': name});
+      }
+    }
+  }
+}
+
 // Drop this into MaterialApp.navigatorObservers (or GoRouter.observers) to
 // auto-fire page_viewed on every named route push/replace.
 class TrackNavigatorObserver extends NavigatorObserver {
