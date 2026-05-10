@@ -4,7 +4,7 @@
 //
 // Session ID strategy: this helper does NOT mint its own session id when
 // the host app already has one. Reads `sessionStorage` in this order:
-//   1. `pulse_session_id`   — injected by the Flutter native shell when
+//   1. `signal_session_id`   — injected by the Flutter native shell when
 //                              this page runs inside an in-app webview.
 //   2. `x-session-id`        — canonical web session id (matches the host
 //                              repo's `getSessionId()` in sessionId.ts).
@@ -46,9 +46,12 @@ const FLUSH_AT = 20;
 const FLUSH_INTERVAL_MS = 5_000;
 const MAX_REQUEST_EVENTS = 100;
 
-// Storage keys — kept in sync with the host repo's existing conventions.
+// Storage keys — signal-namespaced for our own use; `x-session-id` matches
+// the host repo's canonical web session-id key (set by `getSessionId()` in
+// sessionId.ts) so signal events line up with the API client's
+// `X-Session-Id` header.
 const ANON_KEY = 'signal.a_id';
-const SESSION_KEY_WEBVIEW = 'pulse_session_id'; // Flutter shell injects this
+const SESSION_KEY_WEBVIEW = 'signal_session_id'; // Flutter shell injects this
 const SESSION_KEY_WEB = 'x-session-id';         // canonical web key
 
 type Properties = Record<string, unknown>;
@@ -97,7 +100,7 @@ function loadAnon(): string {
 // Read session id from the host app's existing storage. Falls back to
 // minting one only when neither key is set — that case shouldn't happen
 // in production because either the Flutter shell has injected
-// `pulse_session_id` or the host's sessionId.ts has populated
+// `signal_session_id` or the host's sessionId.ts has populated
 // `x-session-id` before we get here.
 function readSessionId(): string {
   try {

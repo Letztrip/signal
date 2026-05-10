@@ -96,11 +96,11 @@ If `track.ts` / `track.dart` already exists, diff before overwriting.
 The helper does NOT mint its own session id when the host already has one.
 Wire it to the host's existing source so analytics events carry the same
 id that goes into HTTP headers (`X-Session-Id`), webview-injected storage
-(`pulse_session_id`), and the rest of the host's tracking plumbing.
+(`signal_session_id`), and the rest of the host's tracking plumbing.
 
 | Stack | Existing session-id source | How the helper picks it up |
 |---|---|---|
-| Web (Next.js / React) | `getSessionId()` in `sessionId.ts` writes to `sessionStorage['x-session-id']`. Webview-rendered pages get `sessionStorage['pulse_session_id']` from the Flutter shell. | **Automatic.** The helper reads both keys (webview key first), no host code change needed. Make sure the host's `getSessionId()` runs before the first `track(...)` — in practice it always does, the `apiClient` interceptors call it on the first request. |
+| Web (Next.js / React) | `getSessionId()` in `sessionId.ts` writes to `sessionStorage['x-session-id']`. Webview-rendered pages get `sessionStorage['signal_session_id']` from the Flutter shell. | **Automatic.** The helper reads both keys (webview key first), no host code change needed. Make sure the host's `getSessionId()` runs before the first `track(...)` — in practice it always does, the `apiClient` interceptors call it on the first request. |
 | Flutter | `applicationVariables.sessionID` (UUID v4 minted once per app launch in `lib/shared/utils/applicationVariables.dart`). | **Pass it explicitly** in `initAnalytics(sessionId: applicationVariables.sessionID)`. |
 
 Verify the host has a session-id source before wiring:
@@ -108,7 +108,7 @@ Verify the host has a session-id source before wiring:
 ```bash
 # Web
 grep -rn 'sessionStorage' --include='*.ts' --include='*.tsx' src lib 2>/dev/null \
-  | grep -iE 'x-session-id|pulse_session_id|getSessionId'
+  | grep -iE 'x-session-id|signal_session_id|getSessionId'
 
 # Flutter
 grep -rn 'sessionID\|session_id' --include='*.dart' lib 2>/dev/null \
