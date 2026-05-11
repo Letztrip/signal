@@ -64,7 +64,7 @@ steps:
       - '-c'
       - |-
         IMAGE="us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}"
-        docker save "$IMAGE" -o /workspace/image.tar
+        docker save "$$IMAGE" -o /workspace/image.tar
         docker run --rm -v /workspace:/workspace aquasec/trivy:latest \
           image --input /workspace/image.tar \
           --severity CRITICAL --exit-code 1 --no-progress
@@ -122,21 +122,21 @@ steps:
       - '-c'
       - |-
         # Resolve the latest revision URL and ping /healthz before routing traffic.
-        REV_URL=$(gcloud run revisions list \
+        REV_URL=$$(gcloud run revisions list \
           --service=${_CLOUD_RUN_SERVICE} \
           --region=${_REGION} \
           --project=${_PROJECT_ID} \
           --format='value(status.address.url)' \
           --limit=1)
-        if [ -z "$REV_URL" ]; then
-          REV_URL=$(gcloud run services describe ${_CLOUD_RUN_SERVICE} \
+        if [ -z "$$REV_URL" ]; then
+          REV_URL=$$(gcloud run services describe ${_CLOUD_RUN_SERVICE} \
             --region=${_REGION} --project=${_PROJECT_ID} \
             --format='value(status.url)')
         fi
-        echo "Pinging $REV_URL/healthz"
+        echo "Pinging $$REV_URL/healthz"
         for i in 1 2 3 4 5; do
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$REV_URL/healthz" || true)
-          if [ "$STATUS" = "200" ]; then echo "healthy"; exit 0; fi
+          STATUS=$$(curl -s -o /dev/null -w '%{http_code}' "$$REV_URL/healthz" || true)
+          if [ "$$STATUS" = "200" ]; then echo "healthy"; exit 0; fi
           sleep 5
         done
         echo "Health check failed after 5 attempts"; exit 1
