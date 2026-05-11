@@ -91,14 +91,18 @@ steps:
           touch /workspace/.first_deploy
         fi
 
+        # Use `@` as the env-var separator instead of comma, so values that
+        # themselves contain commas (CORS_ALLOWED_ORIGINS, when whitelisting
+        # multiple origins) survive gcloud parsing. Passed to --set-env-vars
+        # with the `^@^` prefix below.
         ENV_VARS="GCP_PROJECT=${_PROJECT_ID}"
-        ENV_VARS="$$ENV_VARS,PUBSUB_TOPIC=${_PUBSUB_TOPIC}"
-        ENV_VARS="$$ENV_VARS,COLLECTOR_PORT=8080"
-        ENV_VARS="$$ENV_VARS,LOG_LEVEL=${_LOG_LEVEL}"
-        ENV_VARS="$$ENV_VARS,COLLECTOR_VERSION=${TAG_NAME}"
-        ENV_VARS="$$ENV_VARS,ENVIRONMENT=${_ENVIRONMENT}"
-        ENV_VARS="$$ENV_VARS,WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest"
-        ENV_VARS="$$ENV_VARS,CORS_ALLOWED_ORIGINS=${_CORS_ALLOWED_ORIGINS}"
+        ENV_VARS="$$ENV_VARS@PUBSUB_TOPIC=${_PUBSUB_TOPIC}"
+        ENV_VARS="$$ENV_VARS@COLLECTOR_PORT=8080"
+        ENV_VARS="$$ENV_VARS@LOG_LEVEL=${_LOG_LEVEL}"
+        ENV_VARS="$$ENV_VARS@COLLECTOR_VERSION=${TAG_NAME}"
+        ENV_VARS="$$ENV_VARS@ENVIRONMENT=${_ENVIRONMENT}"
+        ENV_VARS="$$ENV_VARS@WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest"
+        ENV_VARS="$$ENV_VARS@CORS_ALLOWED_ORIGINS=${_CORS_ALLOWED_ORIGINS}"
 
         # Redis host/port/password come from Secret Manager. The collector SA
         # needs roles/secretmanager.secretAccessor on each of these secrets:
@@ -128,7 +132,7 @@ steps:
           --subnet=${_VPC_SUBNET} \
           --vpc-egress=private-ranges-only \
           --allow-unauthenticated \
-          --set-env-vars="$$ENV_VARS" \
+          --set-env-vars="^@^$$ENV_VARS" \
           --set-secrets="$$SECRETS"
 
   - id: 'Verify revision Ready'
