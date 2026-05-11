@@ -100,6 +100,9 @@ steps:
         ENV_VARS="$$ENV_VARS,ENVIRONMENT=${_ENVIRONMENT}"
         ENV_VARS="$$ENV_VARS,WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest"
 
+        # `--tag=verify` gives us a stable per-revision URL (verify---<service>...)
+        # that bypasses the traffic split, so the smoke step can hit the new
+        # revision directly even when it's deployed at 0% traffic.
         gcloud run deploy ${_CLOUD_RUN_SERVICE} \
           --image=us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME} \
           --project=${_PROJECT_ID} \
@@ -112,6 +115,7 @@ steps:
           --concurrency=80 \
           --timeout=60 \
           $$TRAFFIC_FLAG \
+          --tag=verify \
           --service-account=${_COLLECTOR_SA} \
           --network=${_VPC_NETWORK} \
           --subnet=${_VPC_SUBNET} \
@@ -125,21 +129,22 @@ steps:
     args:
       - '-c'
       - |-
-        # Resolve the latest revision URL and ping /healthz before routing traffic.
-        REV_URL=$$(gcloud run revisions list \
-          --service=${_CLOUD_RUN_SERVICE} \
-          --region=${_REGION} \
-          --project=${_PROJECT_ID} \
-          --format='value(status.address.url)' \
-          --limit=1)
-        if [ -z "$$REV_URL" ]; then
-          REV_URL=$$(gcloud run services describe ${_CLOUD_RUN_SERVICE} \
-            --region=${_REGION} --project=${_PROJECT_ID} \
-            --format='value(status.url)')
+        # Hit the `verify` tagged URL so we reach the NEW revision regardless of
+        # traffic split. Send an ID token so this works whether or not the
+        # service is bound to allUsers (org policy may block public access).
+        URL=$$(gcloud run services describe ${_CLOUD_RUN_SERVICE} \
+          --region=${_REGION} --project=${_PROJECT_ID} \
+          --format='json' | \
+          python3 -c "import sys,json; d=json.load(sys.stdin); print(next(t['url'] for t in d['status']['traffic'] if t.get('tag')=='verify'))")
+        if [ -z "$$URL" ]; then
+          echo "Could not resolve verify-tagged URL"; exit 1
         fi
-        echo "Pinging $$REV_URL/healthz"
+        TOKEN=$$(gcloud auth print-identity-token)
+        echo "Pinging $$URL/healthz"
         for i in 1 2 3 4 5; do
-          STATUS=$$(curl -s -o /dev/null -w '%{http_code}' "$$REV_URL/healthz" || true)
+          STATUS=$$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $$TOKEN" "$$URL/healthz" || true)
+          echo "  attempt $$i: HTTP $$STATUS"
           if [ "$$STATUS" = "200" ]; then echo "healthy"; exit 0; fi
           sleep 5
         done
