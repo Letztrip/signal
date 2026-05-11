@@ -217,9 +217,12 @@ substitutions:
   _REDIS_PORT_SECRET: REDIS_PORT
   _REDIS_PASSWORD_SECRET: REDIS_PASSWORD
   # CORS allow-list for browser clients. Comma-separated origins, or "*"
-  # to allow any. Auth is via X-Write-Key (not cookies), so "*" is safe;
-  # tighten to the actual frontend origin(s) when you know them.
-  _CORS_ALLOWED_ORIGINS: 'https://travafa.com,https://www.travafa.com,https://app.travafa.com'
+  # to allow any. Auth is via X-Write-Key (not cookies, no credentials
+  # mode), so "*" is the standard for analytics-ingest endpoints —
+  # Segment / Mixpanel / GA all do this. The write key is the security
+  # boundary, not the origin. Override per environment if you need a
+  # tighter list.
+  _CORS_ALLOWED_ORIGINS: '*'
 
 options:
   substitution_option: ALLOW_LOOSE
