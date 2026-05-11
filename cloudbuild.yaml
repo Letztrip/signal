@@ -28,7 +28,7 @@ steps:
       - --redact
 
   - id: 'Test Collector'
-    name: 'golang:1.22'
+    name: 'golang:1.25'
     entrypoint: '/bin/sh'
     dir: 'collector'
     args:
