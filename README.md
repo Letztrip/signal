@@ -523,9 +523,10 @@ Up to 100 events, ≤ 1 MB total.
 Sending it with `curl`:
 
 ```sh
+export SIGNAL_WRITE_KEY=wk_dev_...   # paste the plaintext key you received
 curl -sS -X POST http://localhost:8080/v1/events \
   -H 'Content-Type: application/json' \
-  -H 'X-Write-Key: wk_dev_66UYJ1fXMqTOziaL1jgjcQ2pkC9zCa2d' \
+  -H "X-Write-Key: $SIGNAL_WRITE_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -d @batch.json
 ```

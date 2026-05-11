@@ -7,3 +7,4 @@
 # Service-account key files. Never commit these.
 *-key.json
 *.sa.json
+.claude/settings.local.json
