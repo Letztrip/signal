@@ -179,7 +179,7 @@ substitutions:
   # build trigger or `gcloud builds submit --substitutions=_COLLECTOR_SA=...`
   _COLLECTOR_SA: collector-vm@letztrip-production-account.iam.gserviceaccount.com
   _PUBSUB_TOPIC: events-raw
-  _WRITE_KEYS_SECRET_NAME: write-keys
+  _WRITE_KEYS_SECRET_NAME: SIGNAL_WRITE_KEY
   _LOG_LEVEL: info
   # Empty by default — collector logs a warning and runs without idempotency
   # cache. Set to <memorystore-host>:6379 once a Redis instance is provisioned.
