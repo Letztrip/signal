@@ -123,39 +123,33 @@ steps:
           --allow-unauthenticated \
           --set-env-vars="$$ENV_VARS"
 
-  - id: 'Smoke /healthz'
+  - id: 'Verify revision Ready'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: '/bin/bash'
     args:
       - '-c'
       - |-
+        # The collector's /healthz handler just returns 200 with no dependency
+        # check (see collector/server.go handleHealth). Cloud Run's startup
+        # probe already validates the same signal: container booted, port 8080
+        # bound, no immediate crash. So instead of curling /healthz (which is
+        # painful when the service isn't public), confirm the new revision's
+        # Ready condition via the Cloud Run admin API.
         set -e
-        # Resolve the `verify` tagged URL (bypasses traffic split).
-        URL=$$(gcloud run services describe ${_CLOUD_RUN_SERVICE} \
+        LATEST=$$(gcloud run revisions list \
+          --service=${_CLOUD_RUN_SERVICE} \
           --region=${_REGION} --project=${_PROJECT_ID} \
-          --format='json' | \
-          python3 -c "import sys,json; d=json.load(sys.stdin); print(next(t['url'] for t in d['status']['traffic'] if t.get('tag')=='verify'))")
-        if [ -z "$$URL" ]; then
-          echo "Could not resolve verify-tagged URL"; exit 1
+          --format='value(name)' --limit=1)
+        echo "Latest revision: $$LATEST"
+        READY=$$(gcloud run revisions describe $$LATEST \
+          --region=${_REGION} --project=${_PROJECT_ID} \
+          --format=json | \
+          python3 -c "import sys,json; d=json.load(sys.stdin); print(next(c['status'] for c in d['status']['conditions'] if c['type']=='Ready'))")
+        echo "Ready=$$READY"
+        if [ "$$READY" != "True" ]; then
+          echo "Revision $$LATEST is not Ready — aborting before traffic shift"
+          exit 1
         fi
-        # Mint an ID token via the Cloud Build metadata server. `gcloud auth
-        # print-identity-token` doesn't work from Cloud Build's default creds
-        # — the metadata server is the canonical path.
-        TOKEN=$$(curl -fsS -H 'Metadata-Flavor: Google' \
-          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$$URL")
-        if [ -z "$$TOKEN" ]; then
-          echo "Could not mint ID token"; exit 1
-        fi
-        echo "Pinging $$URL/healthz"
-        set +e
-        for i in 1 2 3 4 5; do
-          STATUS=$$(curl -s -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $$TOKEN" "$$URL/healthz")
-          echo "  attempt $$i: HTTP $$STATUS"
-          if [ "$$STATUS" = "200" ]; then echo "healthy"; exit 0; fi
-          sleep 5
-        done
-        echo "Health check failed after 5 attempts"; exit 1
 
   - id: 'Route Canary 10%'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
