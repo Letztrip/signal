@@ -6,10 +6,11 @@
 # (one-time setup via scripts/bootstrap-gcp.sh):
 #   - Pub/Sub schema events-raw-schema, topic events-raw, DLQ topic
 #     events-raw-dlq, BQ subscription events-raw-to-bq.
-#   - Secret Manager secret `write-keys` with at least one PHC-hashed entry.
+#   - Secret Manager secret `SIGNAL_WRITE_KEY` (override via _WRITE_KEYS_SECRET_NAME)
+#     with at least one PHC-hashed entry.
 #   - Service account collector-vm@${_PROJECT_ID}.iam.gserviceaccount.com
 #     with: pubsub.publisher + pubsub.viewer on events-raw,
-#     secretmanager.secretAccessor on the write-keys secret,
+#     secretmanager.secretAccessor on the SIGNAL_WRITE_KEY secret,
 #     redis.editor (only if Memorystore is in use).
 #   - Artifact Registry docker repo named ${_ARTIFACTS_REPO}.
 #   - The Cloud Build service account

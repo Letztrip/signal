@@ -52,7 +52,7 @@ DLQ_SUB="events-raw-dlq-inspection"
 SCHEMA="events-raw-schema"
 DATASET="analytics"
 TABLE="events"
-SECRET="write-keys"
+SECRET="${WRITE_KEYS_SECRET_NAME:-SIGNAL_WRITE_KEY}"
 
 PROTO_FILE="$(cd "$(dirname "$0")/.." && pwd)/schemas/event.proto"
 BQ_SCHEMA_FILE="$(cd "$(dirname "$0")" && pwd)/bq-schema.json"
@@ -156,7 +156,7 @@ exists_or_create \
      --message-retention-duration=7d \
      --project=$PROJECT"
 
-step "9. create the write-keys secret with a placeholder version"
+step "9. create the $SECRET secret with a placeholder version"
 exists_or_create \
   "gcloud secrets describe $SECRET --project=$PROJECT" \
   "gcloud secrets create $SECRET --replication-policy=automatic --project=$PROJECT && \

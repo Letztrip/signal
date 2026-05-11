@@ -67,6 +67,6 @@ Next:
        export GOOGLE_APPLICATION_CREDENTIALS_HOST=/etc/collector/key.json
        export GCP_PROJECT=$PROJECT
        export PUBSUB_TOPIC=events-raw
-       export WRITE_KEYS_SECRET=projects/$PROJECT/secrets/write-keys/versions/latest
+       export WRITE_KEYS_SECRET=projects/$PROJECT/secrets/SIGNAL_WRITE_KEY/versions/latest
        docker compose up --build -d
 EOF

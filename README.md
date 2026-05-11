@@ -74,7 +74,7 @@ storage line. Append the line to the secret:
 
 ```sh
 echo 'demo-app:$argon2id$v=19$m=65536,t=3,p=2$<salt>$<hash>' | \
-  gcloud secrets versions add write-keys --data-file=-
+  gcloud secrets versions add SIGNAL_WRITE_KEY --data-file=-
 ```
 
 The collector points at `versions/latest` and refreshes every 5 minutes
@@ -95,7 +95,7 @@ sudo chmod 600 /etc/collector/key.json
 # 3. Clone this repo on the VM, then:
 export GCP_PROJECT=letztrip-production-account
 export PUBSUB_TOPIC=events-raw
-export WRITE_KEYS_SECRET=projects/$GCP_PROJECT/secrets/write-keys/versions/latest
+export WRITE_KEYS_SECRET=projects/$GCP_PROJECT/secrets/SIGNAL_WRITE_KEY/versions/latest
 export GOOGLE_APPLICATION_CREDENTIALS_HOST=/etc/collector/key.json
 
 docker compose up --build -d
