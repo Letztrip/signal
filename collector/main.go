@@ -113,7 +113,13 @@ func run() error {
 
 	srv := NewServer(validator, topic, idem, keyMgr, log)
 
+	// CORS_ALLOWED_ORIGINS: comma-separated origins, or "*" to allow any.
+	// Default "*" is safe here because auth is via X-Write-Key, not cookies —
+	// see corsMiddleware doc. Tighten to a specific list for production.
+	corsOrigins := strings.Split(envOr("CORS_ALLOWED_ORIGINS", "*"), ",")
+
 	r := chi.NewRouter()
+	r.Use(corsMiddleware(corsOrigins))
 	r.Use(requestIDMiddleware)
 	r.Use(recoverMiddleware(log))
 	r.Use(loggingMiddleware(log))

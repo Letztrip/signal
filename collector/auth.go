@@ -326,6 +326,57 @@ func requestIDFromCtx(ctx context.Context) string {
 	return ""
 }
 
+// corsMiddleware short-circuits browser preflight (OPTIONS) requests with
+// 204 + CORS headers, and adds Access-Control-Allow-Origin to all other
+// responses. Must be registered before route matching so chi doesn't 405
+// on unmatched OPTIONS.
+//
+// `allowedOrigins`:
+//   - empty slice or {"*"} → allow all origins (echo "*" — credentials cannot
+//     be used in this mode, which is fine since auth is via X-Write-Key)
+//   - {"https://app.example.com", ...} → whitelist mode (echo Origin only
+//     when it matches one of the entries; sets Vary: Origin)
+func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowAll := len(allowedOrigins) == 0
+	if len(allowedOrigins) == 1 && allowedOrigins[0] == "*" {
+		allowAll = true
+	}
+	originSet := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		o = strings.TrimSpace(o)
+		if o == "" || o == "*" {
+			continue
+		}
+		originSet[o] = struct{}{}
+	}
+
+	const allowMethods = "POST, GET, OPTIONS"
+	const allowHeaders = "Content-Type, X-Write-Key, Idempotency-Key, X-Request-Id"
+	const maxAge = "3600"
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin != "" {
+				if allowAll {
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				} else if _, ok := originSet[origin]; ok {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Add("Vary", "Origin")
+				}
+			}
+			if r.Method == http.MethodOptions {
+				w.Header().Set("Access-Control-Allow-Methods", allowMethods)
+				w.Header().Set("Access-Control-Allow-Headers", allowHeaders)
+				w.Header().Set("Access-Control-Max-Age", maxAge)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := r.Header.Get("X-Request-ID")
