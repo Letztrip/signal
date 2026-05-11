@@ -95,10 +95,16 @@ steps:
         ENV_VARS="$$ENV_VARS,PUBSUB_TOPIC=${_PUBSUB_TOPIC}"
         ENV_VARS="$$ENV_VARS,COLLECTOR_PORT=8080"
         ENV_VARS="$$ENV_VARS,LOG_LEVEL=${_LOG_LEVEL}"
-        ENV_VARS="$$ENV_VARS,REDIS_ADDR=${_REDIS_ADDR}"
         ENV_VARS="$$ENV_VARS,COLLECTOR_VERSION=${TAG_NAME}"
         ENV_VARS="$$ENV_VARS,ENVIRONMENT=${_ENVIRONMENT}"
         ENV_VARS="$$ENV_VARS,WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest"
+
+        # Redis host/port/password come from Secret Manager. The collector SA
+        # needs roles/secretmanager.secretAccessor on each of these secrets:
+        #   REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
+        SECRETS="REDIS_HOST=${_REDIS_HOST_SECRET}:latest"
+        SECRETS="$$SECRETS,REDIS_PORT=${_REDIS_PORT_SECRET}:latest"
+        SECRETS="$$SECRETS,REDIS_PASSWORD=${_REDIS_PASSWORD_SECRET}:latest"
 
         # `--tag=verify` gives us a stable per-revision URL (verify---<service>...)
         # that bypasses the traffic split, so the smoke step can hit the new
@@ -121,7 +127,8 @@ steps:
           --subnet=${_VPC_SUBNET} \
           --vpc-egress=private-ranges-only \
           --allow-unauthenticated \
-          --set-env-vars="$$ENV_VARS"
+          --set-env-vars="$$ENV_VARS" \
+          --set-secrets="$$SECRETS"
 
   - id: 'Verify revision Ready'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -198,9 +205,12 @@ substitutions:
   _PUBSUB_TOPIC: events-raw
   _WRITE_KEYS_SECRET_NAME: SIGNAL_WRITE_KEY
   _LOG_LEVEL: info
-  # Empty by default — collector logs a warning and runs without idempotency
-  # cache. Set to <memorystore-host>:6379 once a Redis instance is provisioned.
-  _REDIS_ADDR: ''
+  # Redis connection comes from Secret Manager. Override these substitutions if
+  # the secret names differ. The collector SA needs
+  # roles/secretmanager.secretAccessor on each secret.
+  _REDIS_HOST_SECRET: REDIS_HOST
+  _REDIS_PORT_SECRET: REDIS_PORT
+  _REDIS_PASSWORD_SECRET: REDIS_PASSWORD
 
 options:
   substitution_option: ALLOW_LOOSE

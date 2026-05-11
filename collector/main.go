@@ -37,7 +37,9 @@ func run() error {
 	project := mustEnv("GCP_PROJECT")
 	topicName := mustEnv("PUBSUB_TOPIC")
 	port := envOr("COLLECTOR_PORT", defaultPort)
-	redisAddr := envOr("REDIS_ADDR", "")
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort := envOr("REDIS_PORT", "6379")
+	redisPassword := os.Getenv("REDIS_PASSWORD")
 
 	writeKeysSecret := os.Getenv("WRITE_KEYS_SECRET")
 	writeKeysInline := os.Getenv("WRITE_KEYS_PLAINTEXT")
@@ -94,8 +96,9 @@ func run() error {
 	defer topic.Stop()
 
 	var idem IdempStore = NewRedisIdem(nil)
-	if redisAddr != "" {
-		rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	if redisHost != "" {
+		redisAddr := redisHost + ":" + redisPort
+		rdb := redis.NewClient(&redis.Options{Addr: redisAddr, Password: redisPassword})
 		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		if err := rdb.Ping(pingCtx).Err(); err != nil {
 			log.Warn("redis ping failed; idempotency disabled", "err", err)
@@ -105,7 +108,7 @@ func run() error {
 		}
 		cancel()
 	} else {
-		log.Warn("REDIS_ADDR not set; idempotency disabled")
+		log.Warn("REDIS_HOST not set; idempotency disabled")
 	}
 
 	srv := NewServer(validator, topic, idem, keyMgr, log)
