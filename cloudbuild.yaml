@@ -129,9 +129,8 @@ steps:
     args:
       - '-c'
       - |-
-        # Hit the `verify` tagged URL so we reach the NEW revision regardless of
-        # traffic split. Send an ID token so this works whether or not the
-        # service is bound to allUsers (org policy may block public access).
+        set -e
+        # Resolve the `verify` tagged URL (bypasses traffic split).
         URL=$$(gcloud run services describe ${_CLOUD_RUN_SERVICE} \
           --region=${_REGION} --project=${_PROJECT_ID} \
           --format='json' | \
@@ -139,11 +138,19 @@ steps:
         if [ -z "$$URL" ]; then
           echo "Could not resolve verify-tagged URL"; exit 1
         fi
-        TOKEN=$$(gcloud auth print-identity-token)
+        # Mint an ID token via the Cloud Build metadata server. `gcloud auth
+        # print-identity-token` doesn't work from Cloud Build's default creds
+        # — the metadata server is the canonical path.
+        TOKEN=$$(curl -fsS -H 'Metadata-Flavor: Google' \
+          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$$URL")
+        if [ -z "$$TOKEN" ]; then
+          echo "Could not mint ID token"; exit 1
+        fi
         echo "Pinging $$URL/healthz"
+        set +e
         for i in 1 2 3 4 5; do
           STATUS=$$(curl -s -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $$TOKEN" "$$URL/healthz" || true)
+            -H "Authorization: Bearer $$TOKEN" "$$URL/healthz")
           echo "  attempt $$i: HTTP $$STATUS"
           if [ "$$STATUS" = "200" ]; then echo "healthy"; exit 0; fi
           sleep 5
