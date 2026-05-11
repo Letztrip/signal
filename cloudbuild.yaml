@@ -75,45 +75,48 @@ steps:
 
   - id: 'Deploy (no traffic)'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
+    entrypoint: '/bin/bash'
     args:
-      - run
-      - deploy
-      - ${_CLOUD_RUN_SERVICE}
-      - --image
-      - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}
-      - --project
-      - ${_PROJECT_ID}
-      - --region
-      - ${_REGION}
-      - --port
-      - '8080'
-      - --memory
-      - 512Mi
-      - --cpu
-      - '1'
-      - --min-instances
-      - '1'
-      - --max-instances
-      - '100'
-      - --concurrency
-      - '80'
-      - --timeout
-      - '60'
-      - --no-traffic
-      - --service-account=${_COLLECTOR_SA}
-      - --network=${_VPC_NETWORK}
-      - --subnet=${_VPC_SUBNET}
-      - --vpc-egress=private-ranges-only
-      - --allow-unauthenticated
-      - --set-env-vars=GCP_PROJECT=${_PROJECT_ID}
-      - --set-env-vars=PUBSUB_TOPIC=${_PUBSUB_TOPIC}
-      - --set-env-vars=COLLECTOR_PORT=8080
-      - --set-env-vars=LOG_LEVEL=${_LOG_LEVEL}
-      - --set-env-vars=REDIS_ADDR=${_REDIS_ADDR}
-      - --set-env-vars=COLLECTOR_VERSION=${TAG_NAME}
-      - --set-env-vars=ENVIRONMENT=${_ENVIRONMENT}
-      - --set-env-vars=WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest
+      - '-c'
+      - |-
+        # First deploy of a service can't use --no-traffic (Cloud Run requires
+        # an initial revision to take 100%). Detect existence; on first deploy,
+        # skip --no-traffic and write a marker so later steps skip the canary.
+        TRAFFIC_FLAG="--no-traffic"
+        if ! gcloud run services describe ${_CLOUD_RUN_SERVICE} \
+               --region=${_REGION} --project=${_PROJECT_ID} >/dev/null 2>&1; then
+          echo "First deploy of ${_CLOUD_RUN_SERVICE} — taking 100% traffic"
+          TRAFFIC_FLAG=""
+          touch /workspace/.first_deploy
+        fi
+
+        ENV_VARS="GCP_PROJECT=${_PROJECT_ID}"
+        ENV_VARS="$$ENV_VARS,PUBSUB_TOPIC=${_PUBSUB_TOPIC}"
+        ENV_VARS="$$ENV_VARS,COLLECTOR_PORT=8080"
+        ENV_VARS="$$ENV_VARS,LOG_LEVEL=${_LOG_LEVEL}"
+        ENV_VARS="$$ENV_VARS,REDIS_ADDR=${_REDIS_ADDR}"
+        ENV_VARS="$$ENV_VARS,COLLECTOR_VERSION=${TAG_NAME}"
+        ENV_VARS="$$ENV_VARS,ENVIRONMENT=${_ENVIRONMENT}"
+        ENV_VARS="$$ENV_VARS,WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest"
+
+        gcloud run deploy ${_CLOUD_RUN_SERVICE} \
+          --image=us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME} \
+          --project=${_PROJECT_ID} \
+          --region=${_REGION} \
+          --port=8080 \
+          --memory=512Mi \
+          --cpu=1 \
+          --min-instances=1 \
+          --max-instances=100 \
+          --concurrency=80 \
+          --timeout=60 \
+          $$TRAFFIC_FLAG \
+          --service-account=${_COLLECTOR_SA} \
+          --network=${_VPC_NETWORK} \
+          --subnet=${_VPC_SUBNET} \
+          --vpc-egress=private-ranges-only \
+          --allow-unauthenticated \
+          --set-env-vars="$$ENV_VARS"
 
   - id: 'Smoke /healthz'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -143,10 +146,14 @@ steps:
 
   - id: 'Route Canary 10%'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: '/bin/sh'
+    entrypoint: '/bin/bash'
     args:
       - '-c'
       - |-
+        if [ -f /workspace/.first_deploy ]; then
+          echo "First deploy already at 100% — skipping canary split"
+          exit 0
+        fi
         gcloud run services update-traffic ${_CLOUD_RUN_SERVICE} \
           --region=${_REGION} \
           --project=${_PROJECT_ID} \
@@ -156,15 +163,18 @@ steps:
 
   - id: 'Promote to 100%'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
+    entrypoint: '/bin/bash'
     args:
-      - run
-      - services
-      - update-traffic
-      - ${_CLOUD_RUN_SERVICE}
-      - --region=${_REGION}
-      - --project=${_PROJECT_ID}
-      - --to-latest
+      - '-c'
+      - |-
+        if [ -f /workspace/.first_deploy ]; then
+          echo "First deploy already at 100% — skipping promote"
+          exit 0
+        fi
+        gcloud run services update-traffic ${_CLOUD_RUN_SERVICE} \
+          --region=${_REGION} \
+          --project=${_PROJECT_ID} \
+          --to-latest
 
 substitutions:
   _PROJECT_ID: letztrip-production-account
