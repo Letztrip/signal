@@ -36,7 +36,7 @@ several choices are deliberate. Don't "fix" them:
 | Logging | `log/slog` (stdlib), not zerolog | Stdlib is enough for one service. No go-core dependency. |
 | Redis client | upstream `github.com/redis/go-redis/v9`, not the Meesho fork | This repo is **not** under the Meesho platform — it's for Letztrip. No `replace` directive. |
 | Platform libs | None — no go-core, no mq, no memcoil, no msearch | Same reason. Signal is a self-contained Letztrip analytics service. |
-| Observability | slog JSON to stderr only; no OTel, no Prometheus | Cloud Run + GCP-native logs cover the single-handler observability need. Adding OTel is fine when you have a question logs can't answer. |
+| Observability | slog JSON + **Sentry** (errors+tracing) + **Prometheus `/metrics`** (Bearer-authed, scraped by vmagent → Grafana); no OTel | Wired via the letztrip-observability fleet conventions (`collector/observability.go`) for unified cross-service dashboards/alerting. Sentry + metrics are no-ops without `SENTRY_DSN` / `METRICS_AUTH_TOKEN`, so dev stays slog-only. OTel still unused. |
 | Module path | `github.com/example/event-pipeline/collector` | Placeholder from the initial scaffold. Not on `github.com/Meesho/...`. Live repo is `github.com/Letztrip/signal`. |
 
 ## Conventions

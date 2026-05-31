@@ -114,6 +114,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		propsRaw := extractField(raw, "properties")
 		if hit := scanPII(propsRaw); hit != "" {
 			s.log.Warn("pii rejected", "event_index", i, "path", hit, "request_id", reqID, "app_id", appID)
+			piiRejectedTotal.Inc()
 			writeErr(w, http.StatusBadRequest, "pii_violation", fmt.Sprintf("event[%d]: pii match at %s", i, hit), reqID)
 			return
 		}
@@ -122,6 +123,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		data, err := proto.Marshal(pb)
 		if err != nil {
 			s.log.Error("proto marshal", "err", err, "request_id", reqID)
+			captureErr(ctx, err)
 			writeErr(w, http.StatusInternalServerError, "internal", "marshal", reqID)
 			return
 		}
@@ -145,10 +147,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		if err != nil {
 			s.log.Error("publish failed", "err", err, "request_id", reqID)
+			captureErr(ctx, err)
+			eventsPublishedTotal.WithLabelValues("error").Inc()
 			writeErr(w, http.StatusServiceUnavailable, "publisher_saturated", "publisher buffer unavailable", reqID)
 			return
 		}
 	}
+
+	eventsReceivedTotal.Add(float64(n))
+	eventsPublishedTotal.WithLabelValues("ok").Add(float64(n))
 
 	respBody, _ := json.Marshal(struct {
 		Accepted  int    `json:"accepted"`

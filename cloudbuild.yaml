@@ -110,6 +110,10 @@ steps:
         SECRETS="REDIS_HOST=${_REDIS_HOST_SECRET}:latest"
         SECRETS="$$SECRETS,REDIS_PORT=${_REDIS_PORT_SECRET}:latest"
         SECRETS="$$SECRETS,REDIS_PASSWORD=${_REDIS_PASSWORD_SECRET}:latest"
+        # Observability: Sentry DSN + shared metrics scrape token. Both secrets
+        # must exist in Secret Manager before deploy (METRICS_AUTH_TOKEN is shared).
+        SECRETS="$$SECRETS,SENTRY_DSN=${_SENTRY_DSN_SECRET}:latest"
+        SECRETS="$$SECRETS,METRICS_AUTH_TOKEN=${_METRICS_AUTH_TOKEN_SECRET}:latest"
 
         # `--tag=verify` gives us a stable per-revision URL (verify---<service>...)
         # that bypasses the traffic split, so the smoke step can hit the new
@@ -216,6 +220,10 @@ substitutions:
   _REDIS_HOST_SECRET: REDIS_HOST
   _REDIS_PORT_SECRET: REDIS_PORT
   _REDIS_PASSWORD_SECRET: REDIS_PASSWORD
+  # Observability secrets (Secret Manager). SENTRY_DSN gates Sentry on;
+  # METRICS_AUTH_TOKEN is the shared, fleet-wide /metrics scrape token.
+  _SENTRY_DSN_SECRET: SENTRY_DSN
+  _METRICS_AUTH_TOKEN_SECRET: METRICS_AUTH_TOKEN
   # CORS allow-list for browser clients. Comma-separated origins, or "*"
   # to allow any. Auth is via X-Write-Key (not cookies, no credentials
   # mode), so "*" is the standard for analytics-ingest endpoints —

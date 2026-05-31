@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 )
@@ -33,6 +34,14 @@ func main() {
 
 func run() error {
 	log := newLogger()
+
+	// Observability: Sentry (errors + tracing) + Prometheus /metrics. Both are
+	// no-ops without their config, so dev/test are unaffected.
+	sentryEnabled := initSentry(log)
+	if sentryEnabled {
+		defer sentry.Flush(sentryFlushTimeout)
+	}
+	metricsToken := os.Getenv("METRICS_AUTH_TOKEN")
 
 	project := mustEnv("GCP_PROJECT")
 	topicName := mustEnv("PUBSUB_TOPIC")
@@ -119,11 +128,18 @@ func run() error {
 	corsOrigins := strings.Split(envOr("CORS_ALLOWED_ORIGINS", "*"), ",")
 
 	r := chi.NewRouter()
-	r.Use(corsMiddleware(corsOrigins))
+	r.Use(corsMiddleware(corsOrigins)) // MUST stay first (see CLAUDE.md)
 	r.Use(requestIDMiddleware)
 	r.Use(recoverMiddleware(log))
+	if sentryEnabled {
+		// After recover so its Repanic is caught and turned into the 500 response.
+		r.Use(sentryMiddleware())
+	}
+	r.Use(metricsMiddleware)
 	r.Use(loggingMiddleware(log))
 	r.Get("/healthz", srv.handleHealth)
+	// /metrics has its own Bearer scheme (METRICS_AUTH_TOKEN); not behind authMiddleware.
+	r.Get("/metrics", metricsHandler(metricsToken).ServeHTTP)
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware(keyMgr))
 		r.Post("/v1/events", srv.handleEvents)
