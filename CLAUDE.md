@@ -25,6 +25,47 @@ subscription handle persistence. No subscriber service to operate.
 > boundaries, request lifecycle, API surface, data model, configuration touch
 > points, critical invariants, and deployment.
 
+## Code Map
+
+Per-file symbol breakdown of the one deployable (`collector/`). All Go source is
+flat peers — no service/repo layers. Folder docs: [`schemas/`](schemas/CLAUDE.md)
+(wire contracts), [`scripts/`](scripts/CLAUDE.md) (GCP provisioning),
+[`collector/eventpb/`](collector/eventpb/CLAUDE.md) (generated proto).
+
+### `collector/main.go` — bootstrap
+- `main()` → calls `run()`, prints `fatal:` + `os.Exit(1)` on error.
+- `run()` — the whole wiring: reads env; `initSentry`; builds `KeyManager` (Secret Manager or inline plaintext), Pub/Sub client + topic (**fails fast if the topic doesn't exist**; `EnableMessageOrdering=true`; publish settings `DelayThreshold=50ms` / `CountThreshold=100` / `ByteThreshold=1MB` / `NumGoroutines=4` / flow-control **Block**), optional Redis idempotency (best-effort ping; warn-and-continue on failure); mounts the chi router + middleware chain; launches `KeyManager.Run` (5-min refresh); starts `http.Server` (read 5s / write 15s / idle 15s); `SIGINT`/`SIGTERM` → 15s graceful shutdown.
+- Middleware order (load-bearing — see NEVER DO): `corsMiddleware` → `requestIDMiddleware` → `recoverMiddleware` → `sentryMiddleware` (only if Sentry enabled) → `metricsMiddleware` → `loggingMiddleware`. Routes: `GET /healthz` (no auth), `GET /metrics` (own Bearer scheme, not `authMiddleware`), `POST /v1/events` (in an `authMiddleware` group).
+- `newLogger()` — slog JSON to stderr, level from `LOG_LEVEL`, every line tagged `svc=collector`.
+- `mustEnv()` — required env or `os.Exit(2)`. `envOr()` — env with fallback.
+
+### `collector/server.go` — handlers + wire flatten
+- Types: `Batch` (`{"batch":[...]}`), `Event` (incoming JSON envelope), `Server` (validator/topic/idem/keys/log).
+- `handleHealth()` — 200 `ok`, **no dependency check** (Cloud Run startup probe is the real liveness gate; cloudbuild verifies the revision `Ready` condition, not this).
+- `handleEvents()` — data plane: idempotency replay (`X-Idempotent-Replay: 1`), `MaxBytesReader` 1 MB (413 `batch_too_large`), decode (400 `invalid_json`), size 1..100 (400 `invalid_batch_size`); per event → JSON-Schema validate (400 `schema_violation`) → PII scan of `properties` (400 `pii_violation`) → `buildProto` → publish (`OrderingKey=anonymous_id`, attrs `event_name`/`app_id`/`platform`); awaits publish results (503 `publisher_saturated` on failure); caches 202 body under idem key; 202 `{accepted,request_id}`. Increments `eventsReceived`/`eventsPublished{ok|error}`/`piiRejected`; `captureErr` to Sentry on marshal/publish error.
+- `buildProto()` — flattens `Event` → `eventpb.AnalyticsEvent`; `properties`/`context` JSON-stringified server-side; `client_ts`/`server_ts` RFC3339.
+- Helpers: `deref`, `parseTime` (empty/unparseable `client_ts` → server-now fallback, logs `clock_skew_total`), `stringFromContext`, `mustJSONString` (invalid → `"{}"`), `extractField`.
+
+### `collector/auth.go` — auth + all middleware
+- Argon2id floor consts (`argonMemoryKiB=64MiB`, `argonTimeCost=3`, `argonThreads=2`, `argonHashLength=32`), `keyRefreshInterval=5m`. `ctxKey`: `ctxKeyAppID`, `ctxKeyRequestID`.
+- `KeyStore.Verify()` — runs argon2id over **every** entry (constant-time; verify cost independent of which/whether a key matches).
+- `ParseKeyStorePlaintext()` (dev: `<app-id>:<plaintext>`, hashed at parse), `ParseKeyStore()` + `parsePHC()` + `parseArgonParams()` (prod: `<app-id>:<PHC argon2id>`; **rejects params below floor**).
+- `KeyManager`: `NewKeyManager` (Secret Manager, sync load, fail-fast), `NewKeyManagerStatic` (inline, loud DEV warning), `Run` (5-min refresh or block in static mode), `Snapshot` (`atomic.Pointer` hot read), `fetchAndParse`.
+- `appIDFromCtx`, `requestIDFromCtx`.
+- Middleware: `corsMiddleware` (allow-all vs whitelist; `OPTIONS`→204 short-circuit; **MUST be first**), `requestIDMiddleware`, `recoverMiddleware` (panic→500), `statusRecorder`, `loggingMiddleware`, `authMiddleware` (`X-Write-Key` verify → `app_id` in ctx, else 401).
+
+### `collector/observability.go` — Sentry + Prometheus
+- `metricsRegistry` (dedicated). Metrics: `signal_http_requests_total{method,route,status}`, `signal_http_request_duration_seconds{method,route}`, `signal_events_received_total`, `signal_events_published_total{result}`, `signal_pii_rejected_total`, `signal_build_info{version}`; plus Go/Process collectors. `init()` registers them and sets `build_info`.
+- `isProduction()` (`ENVIRONMENT==production`, case-insensitive), `initSentry()` (**no-op unless production + `SENTRY_DSN`**; tracing on, `SendDefaultPII=false`; never fails the service), `sentryMiddleware()` (Repanic true), `captureErr()`, `metricsMiddleware()` (labels by chi route pattern; unmatched → `"unmatched"`), `metricsHandler(token)` (Bearer constant-time; no token → 503 in prod, open in dev), `envFloat()`.
+
+### Single-purpose helpers
+- `collector/validator.go` — `Validator`; `NewValidator` embeds `schemas/events.v1.json` (JSON Schema Draft 2020-12); `Validate`.
+- `collector/pii.go` — `piiPatterns` (email/phone/card/ssn regexes); `scanPII` (**`properties` only, never `context`**); `walkPII` (recurses objects + arrays; matches strings only).
+- `collector/idempotency.go` — `idemTTL=24h`; `IdempStore` iface; `RedisIdem` `Get`/`Set` (nil-safe; `redis.Nil`=miss, not error); key `idem:<app_id>:<key>`.
+- `collector/enrich.go` — `ingestVersion="v1"`; `enricher`; `newEnricher` (UA parse; `Now` UTC; `geo_country` left empty — GeoIP is a TODO). `clientIP()` is **dead code** — defined but only referenced in a comment; kept for the future GeoIP wiring.
+- `collector/errors.go` — `errEnvelope`/`errBody`; `writeErr` (single 4xx/5xx envelope shape).
+- `collector/eventpb/event.pb.go` — generated by `protoc-gen-go`; `AnalyticsEvent` (17 string fields); never hand-edit (`make proto`).
+
 ## Stack notes (deliberate deviations)
 
 This repo is Go but does **not** follow standard Meesho Go conventions —

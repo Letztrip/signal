@@ -121,7 +121,7 @@ events join an in-flight batch.
 | Auth | argon2id PHC strings stored in Secret Manager `SIGNAL_WRITE_KEY`; collector parses, holds in immutable `KeyStore`; `KeyManager` refreshes every 5 min via `atomic.Pointer[KeyStore]` swap so rotation is hot. Floor params (`m=65536, t=3, p=2`, hash length 32) enforced at parse time — weaker hashes rejected. Dev path: `WRITE_KEYS_PLAINTEXT` env var, hashed at startup. | `auth.go` |
 | CORS | `corsMiddleware` is first in the chain. Allow-list is comma-separated `CORS_ALLOWED_ORIGINS` env, or `*` (default). Auth is via `X-Write-Key`, no cookies — credentials-mode CORS is intentionally not enabled, so `*` is safe. | `auth.go` |
 | Logging | `log/slog` JSON to stderr. Levels via `LOG_LEVEL` env (`debug`/`info`/`warn`/`error`). Every line carries `svc=collector`. | `main.go` `newLogger` |
-| Observability | None beyond logs. No OTel instrumentation. No Prometheus metrics endpoint. Health is `/healthz` returning 200; Cloud Run startup probe is the only formal liveness signal. | — |
+| Observability | slog JSON + **Sentry** (errors + tracing; no-op unless `ENVIRONMENT=production` and `SENTRY_DSN` set) + **Prometheus `/metrics`** (Bearer-authed via `METRICS_AUTH_TOKEN`, scraped by vmagent → Grafana). No OTel. Health is `/healthz` returning 200; Cloud Run startup probe is the formal liveness signal. | `observability.go` |
 
 ## Section 2 — Low-level details
 
@@ -129,7 +129,7 @@ events join an in-flight batch.
 
 | Module | Entry | What it wires |
 |---|---|---|
-| `collector` | `collector/main.go:run` | Reads env (`GCP_PROJECT`, `PUBSUB_TOPIC`, `WRITE_KEYS_SECRET`/`WRITE_KEYS_PLAINTEXT`, `CORS_ALLOWED_ORIGINS`, `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`, `LOG_LEVEL`, `COLLECTOR_PORT`); constructs `KeyManager`, Pub/Sub client + topic (with publish settings: `DelayThreshold=50ms`, `CountThreshold=100`, `ByteThreshold=1MB`, `NumGoroutines=4`, `Timeout=10s`, flow-control block), Redis client (best-effort ping; warn-on-fail), chi router with the five-stage middleware chain; runs `KeyManager.Run` for 5-min refresh; starts `http.Server` (read 5s / write 15s / idle 15s); `signal.NotifyContext` for SIGINT/SIGTERM → 15s graceful shutdown. |
+| `collector` | `collector/main.go:run` | Reads env (`GCP_PROJECT`, `PUBSUB_TOPIC`, `WRITE_KEYS_SECRET`/`WRITE_KEYS_PLAINTEXT`, `CORS_ALLOWED_ORIGINS`, `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`, `LOG_LEVEL`, `COLLECTOR_PORT`); constructs `KeyManager`, Pub/Sub client + topic (with publish settings: `DelayThreshold=50ms`, `CountThreshold=100`, `ByteThreshold=1MB`, `NumGoroutines=4`, `Timeout=10s`, flow-control block), Redis client (best-effort ping; warn-on-fail), chi router with the middleware chain (CORS → RequestID → Recover → [Sentry] → Metrics → Logging); runs `KeyManager.Run` for 5-min refresh; starts `http.Server` (read 5s / write 15s / idle 15s); `signal.NotifyContext` for SIGINT/SIGTERM → 15s graceful shutdown. |
 
 The collector calls `topic.Exists(ctx)` at startup and **fails fast** if
 the topic is missing — provisioning is the bootstrap script's job, not
@@ -144,16 +144,20 @@ five files in `collector/` are peers, not stacked.
   topic, idem store, key manager, logger. Two handlers: `handleHealth`,
   `handleEvents`.
 - **Wire-format layer** (`eventpb/event.pb.go`): generated; `AnalyticsEvent` 17-field flat proto.
-- **Middleware layer** (`auth.go`): all five middlewares — `corsMiddleware`, `requestIDMiddleware`, `recoverMiddleware`, `loggingMiddleware`, `authMiddleware` — return `func(http.Handler) http.Handler`.
+- **Middleware layer**: `corsMiddleware`, `requestIDMiddleware`, `recoverMiddleware`, `loggingMiddleware`, `authMiddleware` in `auth.go`; `sentryMiddleware`, `metricsMiddleware` in `observability.go`. All return `func(http.Handler) http.Handler`.
 - **Plumbing** (`validator.go`, `pii.go`, `enrich.go`, `idempotency.go`, `errors.go`): single-purpose helpers; no shared state.
 
 ### API surface
 
 | Method | Path | Handler | Middleware chain |
 |---|---|---|---|
-| `GET` | `/healthz` | `Server.handleHealth` | CORS → RequestID → Recover → Logging |
+| `GET` | `/healthz` | `Server.handleHealth` | CORS → RequestID → Recover → [Sentry] → Metrics → Logging |
+| `GET` | `/metrics` | `metricsHandler` | same chain; own Bearer auth (`METRICS_AUTH_TOKEN`), not `authMiddleware` |
 | `OPTIONS` | `*` | (handled by `corsMiddleware`, 204) | CORS only — short-circuits before route match |
-| `POST` | `/v1/events` | `Server.handleEvents` | CORS → RequestID → Recover → Logging → Auth |
+| `POST` | `/v1/events` | `Server.handleEvents` | CORS → RequestID → Recover → [Sentry] → Metrics → Logging → Auth |
+
+The `Sentry` middleware is present only when Sentry initialised
+(`ENVIRONMENT=production` + `SENTRY_DSN`).
 
 Registered in `collector/main.go` around `chi.NewRouter()`. Auth is in a
 `r.Group(...)` so `/healthz` stays unauthenticated.
@@ -225,6 +229,10 @@ Removing or renaming is a new table.
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `main.go:run` | Memorystore. Wired via Secret Manager in production (`cloudbuild.yaml` --set-secrets). Optional — idempotency disabled if `REDIS_HOST` unset. |
 | `COLLECTOR_PORT` | `main.go:run` | HTTP port. Default 8080. |
 | `LOG_LEVEL` | `main.go:newLogger` | slog level: `debug`/`info`/`warn`/`error`. Default info. |
+| `ENVIRONMENT` | `observability.go:isProduction` | Gates Sentry on and `/metrics` closed-by-default. `production` (case-insensitive) = production behaviour. |
+| `SENTRY_DSN` / `SENTRY_RELEASE` / `SENTRY_TRACES_SAMPLE_RATE` | `observability.go:initSentry` | Enable + configure Sentry. No DSN (or non-prod) → Sentry disabled. Sample rate default 1.0. |
+| `METRICS_AUTH_TOKEN` | `observability.go:metricsHandler` | Bearer token for `/metrics`. Unset → 503 in production, open in dev. |
+| `COLLECTOR_VERSION` | `observability.go` / `cloudbuild.yaml` | `signal_build_info` version label + Sentry release fallback. Set to the git tag at deploy. |
 
 Either `WRITE_KEYS_SECRET` or `WRITE_KEYS_PLAINTEXT` must be set;
 plaintext wins when both are present (with a warning). Both unset →
