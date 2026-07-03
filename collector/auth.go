@@ -32,7 +32,18 @@ const (
 	argonHashLength uint32 = 32
 
 	keyRefreshInterval = 5 * time.Minute
+
+	// maxConcurrentVerifies bounds in-flight argon2id computations. Each
+	// argon2.IDKey call pins argonMemoryKiB (64 MiB) for its duration, so
+	// unbounded concurrency at Cloud Run concurrency=80 could demand
+	// 80 × 64 MiB ≈ 5 GiB and OOM-kill the 512 MiB container (observed:
+	// six overlapping verifies → 390 MiB heap → kill). Cap 4 → ≤256 MiB.
+	maxConcurrentVerifies = 4
 )
+
+// verifySem gates Verify; see maxConcurrentVerifies. Package-level because
+// KeyStore snapshots are swapped on refresh but the memory budget is global.
+var verifySem = make(chan struct{}, maxConcurrentVerifies)
 
 type ctxKey int
 
@@ -64,6 +75,8 @@ func (ks *KeyStore) Verify(candidate string) (string, bool) {
 	if ks == nil || candidate == "" || len(ks.entries) == 0 {
 		return "", false
 	}
+	verifySem <- struct{}{}
+	defer func() { <-verifySem }()
 	candBytes := []byte(candidate)
 	matchedApp := ""
 	for _, e := range ks.entries {

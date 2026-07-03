@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,5 +105,42 @@ func TestParseKeyStoreVerify(t *testing.T) {
 	}
 	if _, ok := ks.Verify("wrong-key"); ok {
 		t.Fatalf("verify accepted wrong key")
+	}
+}
+
+// Verify is gated by verifySem (memory-bounded argon2id); concurrent callers
+// must still all complete with correct results and no deadlock.
+func TestVerifyConcurrentBounded(t *testing.T) {
+	ks, err := ParseKeyStorePlaintext("demo-app:wk_test_abc")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	const workers = 3 * maxConcurrentVerifies
+	var wg sync.WaitGroup
+	errs := make(chan string, workers)
+	for i := 0; i < workers; i++ {
+		wantOK := i%2 == 0
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			candidate := "wrong-key"
+			if wantOK {
+				candidate = "wk_test_abc"
+			}
+			app, ok := ks.Verify(candidate)
+			if ok != wantOK {
+				errs <- fmt.Sprintf("candidate %q: ok=%v want %v", candidate, ok, wantOK)
+				return
+			}
+			if wantOK && app != "demo-app" {
+				errs <- fmt.Sprintf("app: got %q want %q", app, "demo-app")
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
 	}
 }
