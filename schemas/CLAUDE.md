@@ -28,7 +28,7 @@ all be `NULLABLE` — this JSON Schema is the only place required fields are enf
 
 ## event.proto
 
-- `message AnalyticsEvent` — 17 fields, **all `string`** (tags 1–17). Timestamps (`client_ts`, `server_ts`) are RFC3339 strings, *not* `google.protobuf.Timestamp`: Pub/Sub Schema Registry rejects external imports, and BQ parses RFC3339 into `TIMESTAMP` columns natively.
+- `message AnalyticsEvent` — 21 fields, **all `string`** (tags 1–21; tags 18–21 are `geo_region`/`geo_city`/`geo_lat`/`geo_lon`, filled by `collector/geoip.go`). Timestamps (`client_ts`, `server_ts`) are RFC3339 strings, *not* `google.protobuf.Timestamp`: Pub/Sub Schema Registry rejects external imports, and BQ parses RFC3339 into `TIMESTAMP` columns natively. `geo_lat`/`geo_lon` are stringified floats for the same all-string reason (analysts `SAFE_CAST` to `FLOAT64`).
 - `go_package` and `package analytics.v1` are placeholders from the scaffold — matched by `../collector/go.mod`'s `github.com/example/event-pipeline/collector` module path. Don't "fix" them.
 
 ### The wire contract is immutable
@@ -40,7 +40,8 @@ Pub/Sub backlog would misread the wire format and corrupt `analytics.events`.
 2. `make proto` → regenerates `../collector/eventpb/event.pb.go`.
 3. Populate it in `../collector/server.go:buildProto`.
 4. Append a matching `NULLABLE` column to `../scripts/bq-schema.json`, then `bq update analytics.events scripts/bq-schema.json`.
-5. Ship the collector. Old rows get `NULL`.
+5. **Commit a new Pub/Sub schema revision**: `gcloud pubsub schemas commit events-raw-schema --type=protocol-buffer --definition-file=event.proto` (or re-run `../scripts/bootstrap-gcp.sh`, step 1). The BQ subscription maps fields via `use_topic_schema` — **without a new revision the appended column silently stays `NULL`**.
+6. Ship the collector. Old rows get `NULL`.
 
 Field order in `event.proto` ↔ column order in `scripts/bq-schema.json` ↔ population
 in `buildProto` must all correspond.

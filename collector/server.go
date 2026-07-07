@@ -44,11 +44,12 @@ type Server struct {
 	topic     *pubsub.Topic
 	idem      IdempStore
 	keys      *KeyManager
+	geo       *geoResolver
 	log       *slog.Logger
 }
 
-func NewServer(v *Validator, topic *pubsub.Topic, idem IdempStore, keys *KeyManager, log *slog.Logger) *Server {
-	return &Server{validator: v, topic: topic, idem: idem, keys: keys, log: log}
+func NewServer(v *Validator, topic *pubsub.Topic, idem IdempStore, keys *KeyManager, geo *geoResolver, log *slog.Logger) *Server {
+	return &Server{validator: v, topic: topic, idem: idem, keys: keys, geo: geo, log: log}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -98,7 +99,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	enr := newEnricher(r, appID)
+	enr := newEnricher(r, appID, s.geo)
 	results := make([]*pubsub.PublishResult, 0, n)
 
 	for i, raw := range batch.Batch {
@@ -192,6 +193,10 @@ func buildProto(ev *Event, enr *enricher, log *slog.Logger) *eventpb.AnalyticsEv
 		UaFamily:      enr.UA.Name,
 		UaOs:          enr.UA.OS,
 		GeoCountry:    enr.Country,
+		GeoRegion:     enr.Region,
+		GeoCity:       enr.City,
+		GeoLat:        enr.Lat,
+		GeoLon:        enr.Lon,
 		IngestVersion: ingestVersion,
 		Properties:    mustJSONString(ev.Properties),
 		Context:       mustJSONString(ev.Context),

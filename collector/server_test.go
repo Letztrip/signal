@@ -30,7 +30,7 @@ func TestProtoRoundTrip(t *testing.T) {
 		Properties:  json.RawMessage(`{"k":"v","n":7}`),
 		Context:     json.RawMessage(`{"platform":"web","app_version":"1.0.0","sdk_version":"0.1.0","locale":"en-US"}`),
 	}
-	enr := newEnricher(httptest.NewRequest("POST", "/v1/events", nil), "demo-app")
+	enr := newEnricher(httptest.NewRequest("POST", "/v1/events", nil), "demo-app", &geoResolver{})
 	enr.Now = time.Date(2026, 5, 8, 12, 0, 1, 0, time.UTC)
 
 	pb := buildProto(ev, enr, log)

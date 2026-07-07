@@ -15,5 +15,9 @@
   { "name": "geo_country",    "type": "STRING",    "mode": "NULLABLE" },
   { "name": "ingest_version", "type": "STRING",    "mode": "NULLABLE" },
   { "name": "properties",     "type": "JSON",      "mode": "NULLABLE" },
-  { "name": "context",        "type": "JSON",      "mode": "NULLABLE" }
+  { "name": "context",        "type": "JSON",      "mode": "NULLABLE" },
+  { "name": "geo_region",     "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "geo_city",       "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "geo_lat",        "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "geo_lon",        "type": "STRING",    "mode": "NULLABLE" }
 ]

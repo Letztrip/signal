@@ -120,7 +120,13 @@ func run() error {
 		log.Warn("REDIS_HOST not set; idempotency disabled")
 	}
 
-	srv := NewServer(validator, topic, idem, keyMgr, log)
+	// GeoIP is best-effort: an absent/unopenable GeoLite2-City DB yields empty
+	// geo fields, never a boot failure. GEOIP_DB_PATH is baked into the image
+	// (see collector/Dockerfile); unset in local dev / tests.
+	geo := newGeoResolver(os.Getenv("GEOIP_DB_PATH"), log)
+	defer geo.Close()
+
+	srv := NewServer(validator, topic, idem, keyMgr, geo, log)
 
 	// CORS_ALLOWED_ORIGINS: comma-separated origins, or "*" to allow any.
 	// Default "*" is safe here because auth is via X-Write-Key, not cookies —

@@ -35,4 +35,8 @@ message AnalyticsEvent {
   string ingest_version  = 15;
   string properties      = 16;
   string context         = 17;
+  string geo_region      = 18;
+  string geo_city        = 19;
+  string geo_lat         = 20;
+  string geo_lon         = 21;
 }

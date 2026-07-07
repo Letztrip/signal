@@ -16,18 +16,26 @@ type enricher struct {
 	AppID   string
 	UA      useragent.UserAgent
 	Country string
+	Region  string
+	City    string
+	Lat     string
+	Lon     string
 }
 
-func newEnricher(r *http.Request, appID string) *enricher {
+func newEnricher(r *http.Request, appID string, geo *geoResolver) *enricher {
 	ua := useragent.Parse(r.Header.Get("User-Agent"))
+	// Cloud Run injects the resolved client IP into X-Forwarded-For; geo is
+	// best-effort — a nil/empty resolver yields empty location fields.
+	loc := geo.resolve(clientIP(r))
 	return &enricher{
-		Now:   time.Now().UTC(),
-		AppID: appID,
-		UA:    ua,
-		// Real GeoIP would resolve clientIP(r) against MaxMind / a sidecar
-		// here. Cloud Run injects the resolved client IP into
-		// X-Forwarded-For; for now we leave geo_country empty.
-		Country: "",
+		Now:     time.Now().UTC(),
+		AppID:   appID,
+		UA:      ua,
+		Country: loc.Country,
+		Region:  loc.Region,
+		City:    loc.City,
+		Lat:     loc.Lat,
+		Lon:     loc.Lon,
 	}
 }
 

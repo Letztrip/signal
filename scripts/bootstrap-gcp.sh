@@ -74,13 +74,28 @@ step "0. provision the Pub/Sub service agent identity"
 gcloud beta services identity create \
   --service=pubsub.googleapis.com --project="$PROJECT" >/dev/null 2>&1 || true
 
-step "1. register the Protobuf schema $SCHEMA"
-exists_or_create \
-  "gcloud pubsub schemas describe $SCHEMA --project=$PROJECT" \
-  "gcloud pubsub schemas create $SCHEMA \
-     --type=protocol-buffer \
-     --definition-file=$PROTO_FILE \
-     --project=$PROJECT"
+step "1. register / revise the Protobuf schema $SCHEMA"
+if gcloud pubsub schemas describe "$SCHEMA" --project="$PROJECT" >/dev/null 2>&1; then
+  # Schema already exists. Commit a NEW REVISION so fields appended to
+  # event.proto (the "Adding a new column" flow) actually enter the wire
+  # contract the BQ subscription maps from — without this, new columns stay
+  # NULL. Committing an unchanged definition just adds a duplicate revision;
+  # errors are tolerated so re-running bootstrap stays idempotent. The topic
+  # is not revision-pinned (step 2), so it accepts the newest revision.
+  if gcloud pubsub schemas commit "$SCHEMA" \
+       --type=protocol-buffer \
+       --definition-file="$PROTO_FILE" \
+       --project="$PROJECT" >/dev/null 2>&1; then
+    echo "  committed new schema revision"
+  else
+    echo "  schema unchanged, skipping"
+  fi
+else
+  gcloud pubsub schemas create "$SCHEMA" \
+    --type=protocol-buffer \
+    --definition-file="$PROTO_FILE" \
+    --project="$PROJECT"
+fi
 
 step "2. create primary topic $TOPIC with the schema attached"
 exists_or_create \
