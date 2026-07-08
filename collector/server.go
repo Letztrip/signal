@@ -190,7 +190,7 @@ func buildProto(ev *Event, enr *enricher, log *slog.Logger) *eventpb.AnalyticsEv
 		AppVersion:    stringFromContext(ev.Context, "app_version"),
 		SdkVersion:    stringFromContext(ev.Context, "sdk_version"),
 		AppId:         enr.AppID,
-		UaFamily:      enr.UA.Name,
+		UaFamily:      enr.UAFamily,
 		UaOs:          enr.UA.OS,
 		GeoCountry:    enr.Country,
 		GeoRegion:     enr.Region,
