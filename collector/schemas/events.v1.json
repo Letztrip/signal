@@ -21,15 +21,9 @@
     },
     "event_name": {
       "type": "string",
-      "enum": [
-        "page_viewed",
-        "button_clicked",
-        "form_submitted",
-        "identify",
-        "session_started",
-        "error_occurred",
-        "scroll_depth"
-      ]
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9_]+$"
     },
     "user_id": {
       "type": ["string", "null"],
