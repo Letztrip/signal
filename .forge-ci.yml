@@ -3,31 +3,89 @@
 # repo's cloudbuild yaml stays the source of truth. Branch model:
 #   dev -> *-dev (no traffic), main-preview -> *-preview (no traffic),
 #   main -> production (live, needs 2 approvals in Forge).
-stages: [deploy]
+stages: [ci, deploy]
 
 default:
   timeout: 90m
 
 jobs:
-  signal-prod-deploy:
+  ci-build:
+    stage: ci
+    tags: [gcp, staging]
+    script:
+      - |
+        set -eu
+        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.yaml /tmp/ci.cloudbuild.yaml
+        echo "forge -> cloud build CI (build) on $(git rev-parse --short=7 HEAD)"
+        BUILD_ID=$(gcloud builds submit --project=letztrip-production-account --config=/tmp/ci.cloudbuild.yaml --substitutions=_CHECK=build --async --format='value(id)' . 2>/dev/null | tail -1)
+        echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
+        while :; do
+          STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
+          echo "$(date -u +%H:%M:%S) $STATUS"
+          case "$STATUS" in
+            SUCCESS) exit 0 ;;
+            FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+          esac
+          sleep 15
+        done
+
+  ci-test:
+    stage: ci
+    tags: [gcp, staging]
+    allow_failure: true
+    script:
+      - |
+        set -eu
+        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.yaml /tmp/ci.cloudbuild.yaml
+        echo "forge -> cloud build CI (test) on $(git rev-parse --short=7 HEAD)"
+        BUILD_ID=$(gcloud builds submit --project=letztrip-production-account --config=/tmp/ci.cloudbuild.yaml --substitutions=_CHECK=test --async --format='value(id)' . 2>/dev/null | tail -1)
+        echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
+        while :; do
+          STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
+          echo "$(date -u +%H:%M:%S) $STATUS"
+          case "$STATUS" in
+            SUCCESS) exit 0 ;;
+            FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+          esac
+          sleep 15
+        done
+
+  ci-security:
+    stage: ci
+    tags: [gcp, staging]
+    allow_failure: true
+    script:
+      - |
+        set -eu
+        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.yaml /tmp/ci.cloudbuild.yaml
+        echo "forge -> cloud build CI (security) on $(git rev-parse --short=7 HEAD)"
+        BUILD_ID=$(gcloud builds submit --project=letztrip-production-account --config=/tmp/ci.cloudbuild.yaml --substitutions=_CHECK=security --async --format='value(id)' . 2>/dev/null | tail -1)
+        echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
+        while :; do
+          STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
+          echo "$(date -u +%H:%M:%S) $STATUS"
+          case "$STATUS" in
+            SUCCESS) exit 0 ;;
+            FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+          esac
+          sleep 15
+        done
+
+  signal-prod-deploy-preview:
     stage: deploy
-    environment: production
-    tags: [gcp, deploy]
+    environment: signal-prod-deploy-preview
+    tags: [gcp, staging]
     rules:
-      - if: '$CI_COMMIT_REF =~ /v[0-9]/'
+      - if: '$CI_COMMIT_REF =~ /[0-9]+[.][0-9]+/'
       - when: never
     script:
       - |
         set -eu
-        # Forge (unmodified upstream) clones the connected repo at the pipeline's
-        # commit into the job workspace; the commit and tag come from git, nothing
-        # is injected by the server.
-        SHA=$(git rev-parse HEAD); SHORT=$(git rev-parse --short=7 HEAD)
         git fetch -q --tags --depth=1 origin
         REF=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
-        [ -n "$REF" ] || { echo "commit carries no tag: a branch push, nothing to deploy"; exit 0; }
-        echo "forge -> cloud build trigger signal-prod-deploy --tag=$REF "
-        BUILD_ID=$(gcloud builds triggers run signal-prod-deploy --project=letztrip-production-account --region=global --tag="$REF" --format='value(metadata.build.id)')
+        [ -n "$REF" ] || { echo "commit carries no tag: nothing to deploy"; exit 0; }
+        echo "forge -> cloud build trigger signal-prod-deploy --tag=$REF (preview, no traffic)"
+        BUILD_ID=$(gcloud builds triggers run signal-prod-deploy --project=letztrip-production-account --region=global --tag="$REF" --substitutions='_DEPLOY_FLAGS=--no-traffic --tag=preview --min-instances=0 --max-instances=2 --cpu-throttling' --format='value(metadata.build.id)')
         echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
         while :; do
           STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')

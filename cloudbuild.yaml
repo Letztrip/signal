@@ -49,7 +49,7 @@ steps:
       - -f
       - collector/Dockerfile
       - -t
-      - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}
+      - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${_IMAGE_TAG}
       - -t
       - us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:latest
       - --cache-from
@@ -64,7 +64,7 @@ steps:
     args:
       - '-c'
       - |-
-        IMAGE="us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}"
+        IMAGE="us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${_IMAGE_TAG}"
         docker save "$$IMAGE" -o /workspace/image.tar
         docker run --rm -v /workspace:/workspace aquasec/trivy:latest \
           image --input /workspace/image.tar \
@@ -99,7 +99,7 @@ steps:
         ENV_VARS="$$ENV_VARS@PUBSUB_TOPIC=${_PUBSUB_TOPIC}"
         ENV_VARS="$$ENV_VARS@COLLECTOR_PORT=8080"
         ENV_VARS="$$ENV_VARS@LOG_LEVEL=${_LOG_LEVEL}"
-        ENV_VARS="$$ENV_VARS@COLLECTOR_VERSION=${TAG_NAME}"
+        ENV_VARS="$$ENV_VARS@COLLECTOR_VERSION=${_IMAGE_TAG}"
         ENV_VARS="$$ENV_VARS@ENVIRONMENT=${_ENVIRONMENT}"
         ENV_VARS="$$ENV_VARS@WRITE_KEYS_SECRET=projects/${_PROJECT_ID}/secrets/${_WRITE_KEYS_SECRET_NAME}/versions/latest"
         ENV_VARS="$$ENV_VARS@CORS_ALLOWED_ORIGINS=${_CORS_ALLOWED_ORIGINS}"
@@ -119,7 +119,8 @@ steps:
         # that bypasses the traffic split, so the smoke step can hit the new
         # revision directly even when it's deployed at 0% traffic.
         gcloud run deploy ${_CLOUD_RUN_SERVICE} \
-          --image=us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME} \
+          ${_DEPLOY_FLAGS} \
+          --image=us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${_IMAGE_TAG} \
           --project=${_PROJECT_ID} \
           --region=${_REGION} \
           --port=8080 \
@@ -177,6 +178,7 @@ steps:
           echo "First deploy already at 100% — skipping canary split"
           exit 0
         fi
+        [ -z "${_DEPLOY_FLAGS}" ] || { echo "preview/staging deploy (${_DEPLOY_FLAGS}): no traffic promotion"; exit 0; }
         gcloud run services update-traffic ${_CLOUD_RUN_SERVICE} \
           --region=${_REGION} \
           --project=${_PROJECT_ID} \
@@ -194,12 +196,15 @@ steps:
           echo "First deploy already at 100% — skipping promote"
           exit 0
         fi
+        [ -z "${_DEPLOY_FLAGS}" ] || { echo "preview/staging deploy (${_DEPLOY_FLAGS}): no traffic promotion"; exit 0; }
         gcloud run services update-traffic ${_CLOUD_RUN_SERVICE} \
           --region=${_REGION} \
           --project=${_PROJECT_ID} \
           --to-latest
 
 substitutions:
+  _DEPLOY_FLAGS: ""   # Forge CI: "--no-traffic --tag=dev|preview" for branch deploys
+  _IMAGE_TAG: "${TAG_NAME}"   # Forge CI passes the short sha on branch builds
   _PROJECT_ID: letztrip-production-account
   _ARTIFACTS_REPO: signal-repo
   _REGION: us-central1
@@ -238,8 +243,8 @@ options:
   machineType: 'E2_HIGHCPU_8'
 
 timeout: 1800s
-tags: [signal, collector, '${TAG_NAME}']
+tags: [signal, collector, '${_IMAGE_TAG}']
 
 images:
-  - 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${TAG_NAME}'
+  - 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:${_IMAGE_TAG}'
   - 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_ARTIFACTS_REPO}/${_SERVICE_NAME}:latest'
