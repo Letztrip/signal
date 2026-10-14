@@ -115,7 +115,7 @@ jobs:
         REF=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
         [ -n "$REF" ] || { echo "commit carries no tag: nothing to deploy"; exit 0; }
         echo "forge -> cloud build trigger signal-prod-deploy --tag=$REF (preview, no traffic)"
-        BUILD_ID=$(gcloud builds triggers run signal-prod-deploy --project=letztrip-production-account --region=global --tag="$REF" --substitutions='_DEPLOY_FLAGS=--no-traffic --tag=preview --min-instances=0 --max-instances=2 --cpu-throttling' --format='value(metadata.build.id)')
+        BUILD_ID=$(gcloud builds triggers run signal-prod-deploy --project=letztrip-production-account --region=global --tag="$REF" --substitutions='_DEPLOY_FLAGS=--no-traffic --tag=preview' --format='value(metadata.build.id)')
         echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
         while :; do
           STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
