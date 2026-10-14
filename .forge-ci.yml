@@ -15,9 +15,19 @@ jobs:
     script:
       - |
         set -eu
-        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.yaml /tmp/ci.cloudbuild.yaml
-        echo "forge -> cloud build CI (build) on $(git rev-parse --short=7 HEAD)"
-        BUILD_ID=$(gcloud builds submit --project=letztrip-production-account --config=/tmp/ci.cloudbuild.yaml --substitutions=_CHECK=build --async --format='value(id)' . 2>/dev/null | tail -1)
+        SHA=$(git rev-parse --short=7 HEAD); OBJ=forge-ci/$SHA-$CI_JOB_ID.tgz
+        tar czf /tmp/src.tgz --exclude=.git --exclude=node_modules --exclude=.next --exclude=target --exclude=bin --exclude=obj .
+        gsutil -q cp /tmp/src.tgz gs://letztrip-production-account_cloudbuild/$OBJ
+        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.json /tmp/ci.json
+        python3 - "$OBJ" build <<'PY' > /tmp/build.json
+        import json, sys
+        b = json.load(open('/tmp/ci.json'))
+        b['source'] = {'storageSource': {'bucket': 'letztrip-production-account_cloudbuild', 'object': sys.argv[1]}}
+        b['substitutions'] = {'_CHECK': sys.argv[2]}
+        json.dump(b, sys.stdout)
+        PY
+        echo "forge -> cloud build CI (build) on $SHA"
+        BUILD_ID=$(curl -sS -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" -H 'Content-Type: application/json' --data-binary @/tmp/build.json https://cloudbuild.googleapis.com/v1/projects/letztrip-production-account/builds | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("metadata",{}).get("build",{}).get("id") or sys.exit("create failed: "+json.dumps(d)[:300]))')
         echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
         while :; do
           STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
@@ -36,9 +46,19 @@ jobs:
     script:
       - |
         set -eu
-        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.yaml /tmp/ci.cloudbuild.yaml
-        echo "forge -> cloud build CI (test) on $(git rev-parse --short=7 HEAD)"
-        BUILD_ID=$(gcloud builds submit --project=letztrip-production-account --config=/tmp/ci.cloudbuild.yaml --substitutions=_CHECK=test --async --format='value(id)' . 2>/dev/null | tail -1)
+        SHA=$(git rev-parse --short=7 HEAD); OBJ=forge-ci/$SHA-$CI_JOB_ID.tgz
+        tar czf /tmp/src.tgz --exclude=.git --exclude=node_modules --exclude=.next --exclude=target --exclude=bin --exclude=obj .
+        gsutil -q cp /tmp/src.tgz gs://letztrip-production-account_cloudbuild/$OBJ
+        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.json /tmp/ci.json
+        python3 - "$OBJ" test <<'PY' > /tmp/build.json
+        import json, sys
+        b = json.load(open('/tmp/ci.json'))
+        b['source'] = {'storageSource': {'bucket': 'letztrip-production-account_cloudbuild', 'object': sys.argv[1]}}
+        b['substitutions'] = {'_CHECK': sys.argv[2]}
+        json.dump(b, sys.stdout)
+        PY
+        echo "forge -> cloud build CI (test) on $SHA"
+        BUILD_ID=$(curl -sS -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" -H 'Content-Type: application/json' --data-binary @/tmp/build.json https://cloudbuild.googleapis.com/v1/projects/letztrip-production-account/builds | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("metadata",{}).get("build",{}).get("id") or sys.exit("create failed: "+json.dumps(d)[:300]))')
         echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
         while :; do
           STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
@@ -57,9 +77,19 @@ jobs:
     script:
       - |
         set -eu
-        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.yaml /tmp/ci.cloudbuild.yaml
-        echo "forge -> cloud build CI (security) on $(git rev-parse --short=7 HEAD)"
-        BUILD_ID=$(gcloud builds submit --project=letztrip-production-account --config=/tmp/ci.cloudbuild.yaml --substitutions=_CHECK=security --async --format='value(id)' . 2>/dev/null | tail -1)
+        SHA=$(git rev-parse --short=7 HEAD); OBJ=forge-ci/$SHA-$CI_JOB_ID.tgz
+        tar czf /tmp/src.tgz --exclude=.git --exclude=node_modules --exclude=.next --exclude=target --exclude=bin --exclude=obj .
+        gsutil -q cp /tmp/src.tgz gs://letztrip-production-account_cloudbuild/$OBJ
+        gsutil -q cp gs://letztrip-production-account-forge-artifacts/ci/ci.cloudbuild.json /tmp/ci.json
+        python3 - "$OBJ" security <<'PY' > /tmp/build.json
+        import json, sys
+        b = json.load(open('/tmp/ci.json'))
+        b['source'] = {'storageSource': {'bucket': 'letztrip-production-account_cloudbuild', 'object': sys.argv[1]}}
+        b['substitutions'] = {'_CHECK': sys.argv[2]}
+        json.dump(b, sys.stdout)
+        PY
+        echo "forge -> cloud build CI (security) on $SHA"
+        BUILD_ID=$(curl -sS -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" -H 'Content-Type: application/json' --data-binary @/tmp/build.json https://cloudbuild.googleapis.com/v1/projects/letztrip-production-account/builds | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("metadata",{}).get("build",{}).get("id") or sys.exit("create failed: "+json.dumps(d)[:300]))')
         echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
         while :; do
           STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
@@ -85,7 +115,7 @@ jobs:
         REF=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
         [ -n "$REF" ] || { echo "commit carries no tag: nothing to deploy"; exit 0; }
         echo "forge -> cloud build trigger signal-prod-deploy --tag=$REF (preview, no traffic)"
-        BUILD_ID=$(gcloud builds triggers run signal-prod-deploy --project=letztrip-production-account --region=global --tag="$REF" --substitutions='_DEPLOY_FLAGS=--no-traffic --tag=preview --min-instances=0 --max-instances=2 --cpu-throttling' --format='value(metadata.build.id)')
+        BUILD_ID=$(gcloud builds triggers run signal-prod-deploy --project=letztrip-production-account --region=global --tag="$REF" --substitutions='_DEPLOY_FLAGS=--no-traffic --tag=preview' --format='value(metadata.build.id)')
         echo "build: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=letztrip-production-account"
         while :; do
           STATUS=$(gcloud builds describe "$BUILD_ID" --project=letztrip-production-account --format='value(status)')
