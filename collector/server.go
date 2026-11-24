@@ -20,6 +20,11 @@ const (
 	maxBatchBytes  = 1 << 20 // 1 MB
 	maxBatchSize   = 100
 	publishTimeout = 10 * time.Second
+	// resultWait outlasts the publisher's own PublishSettings.Timeout (10s,
+	// main.go) so a result is the library's final answer. Waiting exactly as
+	// long raced it: the wait gave up, ResumePublish ran on a key not yet
+	// paused, then the library failed the publish and paused it after all.
+	resultWait = publishTimeout + 5*time.Second
 )
 
 type Batch struct {
@@ -100,7 +105,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enr := newEnricher(r, appID, s.geo)
-	results := make([]*pubsub.PublishResult, 0, n)
+	msgs := make([]*pubsub.Message, 0, n)
 
 	for i, raw := range batch.Batch {
 		if err := s.validator.Validate(raw); err != nil {
@@ -128,8 +133,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, "internal", "marshal", reqID)
 			return
 		}
-		pubCtx, cancel := context.WithTimeout(ctx, publishTimeout)
-		res := s.topic.Publish(pubCtx, &pubsub.Message{
+		msgs = append(msgs, &pubsub.Message{
 			Data:        data,
 			OrderingKey: ev.AnonymousID,
 			Attributes: map[string]string{
@@ -138,21 +142,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				"platform":   pb.GetPlatform(),
 			},
 		})
-		cancel()
-		results = append(results, res)
 	}
 
-	for _, res := range results {
-		pubCtx, cancel := context.WithTimeout(ctx, publishTimeout)
-		_, err := res.Get(pubCtx)
-		cancel()
-		if err != nil {
-			s.log.Error("publish failed", "err", err, "request_id", reqID)
-			captureErr(ctx, err)
-			eventsPublishedTotal.WithLabelValues("error").Inc()
-			writeErr(w, http.StatusServiceUnavailable, "publisher_saturated", "publisher buffer unavailable", reqID)
-			return
-		}
+	if err := s.publishAll(ctx, msgs); err != nil {
+		s.log.Error("publish failed", "err", err, "request_id", reqID)
+		captureErr(ctx, err)
+		eventsPublishedTotal.WithLabelValues("error").Inc()
+		writeErr(w, http.StatusServiceUnavailable, "publisher_saturated", "publisher buffer unavailable", reqID)
+		return
 	}
 
 	eventsReceivedTotal.Add(float64(n))
@@ -172,6 +169,45 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write(respBody)
+}
+
+// publishAll publishes msgs and waits for every result, returning the first error.
+//
+// Two rules keep one visitor's events flowing (INTERNAL-133). With ordering on,
+// any failed publish pauses its ordering key on this topic: every later message
+// for that key fails with ErrPublishingPaused until ResumePublish is called.
+//
+//   - The publish runs on a context detached from the request. Once validated, a
+//     batch is published even if the client hangs up mid-request; inheriting the
+//     request context let a closed tab fail the library's flow-control acquire,
+//     which paused that visitor's key.
+//   - Every failed key is resumed, not just the first one hit, so a real failure
+//     costs one 503 and the client's retry goes through, instead of failing that
+//     visitor on this pod until it restarts. Ordering across a failure is not
+//     guaranteed either way: the client re-sends the whole batch.
+func (s *Server) publishAll(ctx context.Context, msgs []*pubsub.Message) error {
+	pubCtx := context.WithoutCancel(ctx)
+	results := make([]*pubsub.PublishResult, 0, len(msgs))
+	for _, m := range msgs {
+		c, cancel := context.WithTimeout(pubCtx, publishTimeout)
+		results = append(results, s.topic.Publish(c, m))
+		cancel()
+	}
+	var firstErr error
+	for i, res := range results {
+		c, cancel := context.WithTimeout(pubCtx, resultWait)
+		_, err := res.Get(c)
+		cancel()
+		if err != nil {
+			if key := msgs[i].OrderingKey; key != "" {
+				s.topic.ResumePublish(key)
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }
 
 // buildProto flattens an SDK Event into the wire-format AnalyticsEvent.
